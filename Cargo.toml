@@ -1,0 +1,20 @@
+[package]
+name = "fowin"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+# TODO: only need crossbeam-channel
+crossbeam = "0.8.2"
+once_cell = "1.19.0"
+icrate = { version = "0.0.4", features = [
+  "AppKit",
+  "AppKit_NSWorkspace",
+  "AppKit_NSRunningApplication",
+  "Foundation",
+  "Foundation_NSArray",
+  "Foundation_NSNotification",
+  "Foundation_NSNotificationCenter",
+  "Foundation_NSOperationQueue",
+] }
