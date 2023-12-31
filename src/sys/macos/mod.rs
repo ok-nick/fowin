@@ -1,4 +1,4 @@
-use std::ptr::NonNull;
+use std::{collections::HashMap, iter, ptr::NonNull};
 
 use crossbeam::channel::Sender;
 use icrate::{
@@ -13,7 +13,7 @@ use icrate::{
     Foundation::{NSNotification, NSNotificationCenter},
 };
 
-use crate::protocol::{Position, Size, WindowEventInfo, WindowId, WindowManagerBackend};
+use crate::protocol::{DisplayId, Position, Size, WindowEventInfo, WindowId, WindowManagerBackend};
 
 use self::ffi::NSRunningApplication_processIdentifier;
 pub use self::{application::Application, window::Window};
@@ -39,69 +39,73 @@ mod window;
 //     // AppleInterfaceMenuBarHidingChangedNotification
 // ];
 
-pub fn all_apps() -> Result<Vec<Application>, ()> {
-    let mut apps = Vec::new();
-
-    let workspace = unsafe { NSWorkspace::sharedWorkspace().runningApplications() };
-    // TODO: filter by activation policy regular?
-    for app in workspace {
-        let pid = unsafe { NSRunningApplication_processIdentifier(&app) };
-        match pid {
-            -1 => {
-                // doesn't exist
-            }
-            _ => apps.push(Application::new(pid)?),
-        }
-    }
-
-    Ok(apps)
-}
-// TODO: reorganize this, I should probably store apps within the window manager?
 #[derive(Debug)]
 pub struct WindowManager {
+    // users only know about windows, apps aren't exposed to them
     apps: Vec<Application>,
+    windows: HashMap<WindowId, Window>,
 }
 
 impl WindowManager {
     pub fn new() -> Self {
-        Self { apps: Vec::new() }
+        Self {
+            apps: Vec::new(),
+            windows: HashMap::new(),
+        }
     }
 
-    pub fn listen_global_events(&self, sender: Sender<WindowEventInfo>) {
-        // let selector = sel!(global_notification);
+    // TODO: dedup here?
+    // aka add all currently running apps
+    pub fn init(&mut self) -> Result<(), ()> {
+        let workspace = unsafe { NSWorkspace::sharedWorkspace().runningApplications() };
+        // TODO: filter by activation policy regular?
+        for app in workspace {
+            let pid = unsafe { NSRunningApplication_processIdentifier(&app) };
+            match pid {
+                -1 => {
+                    // doesn't exist
+                }
+                _ => self.apps.push(Application::new(pid)?),
+            }
+        }
 
-        // let mut builder = ClassBuilder::new("TODO", NSObject::class()).unwrap();
-        // unsafe { builder.add_method(selector, global_notification) }
-        // let class = builder.register();
+        Ok(())
+    }
 
-        // let center = unsafe { NSWorkspace::sharedWorkspace().notificationCenter() };
-        // for notification in GLOBAL_NOTIFICATIONS {
-        //     unsafe {
-        //         center.addObserver_selector_name_object(class, selector, Some(notification), None);
-        //     }
-        // }
-        let center = unsafe { NSNotificationCenter::defaultCenter() };
-        // let block = ConcreteBlock::new(move |notification: NonNull<NSNotification>| {
-        //     let notification = unsafe { notification.as_ref() };
-        // })
+    // since apps.windows() takes a ref to the app, need to extend the lifetime to self
+    pub fn iter_windows(&mut self) -> impl Iterator<Item = Result<Window, ()>> + '_ {
+        // an absolute monster of an iterator
+        self.apps.iter().flat_map(|app| {
+            app.windows()
+                .into_iter()
+                .flat_map(|windows| windows.into_iter().map(Ok::<Window, ()>))
+        })
+    }
+
+    pub fn watch_windows(&self, sender: Sender<WindowEventInfo>) {
         let block = ConcreteBlock::new(move |notification: NonNull<NSNotification>| {
             let notification = unsafe { notification.as_ref() };
             let name = unsafe { notification.name() };
 
-            // TODO: standardize event names, construct windowevent, send to sender
-            if unsafe { &*name == (NSWorkspaceDidLaunchApplicationNotification) } {
-                // TODO: we need to add this app to the watched windows
-                // should we do it from here or should we send an event for the user to add it? The latter may be more useful so they can idiomatically filter applications
+            if unsafe { &*name == NSWorkspaceDidLaunchApplicationNotification } {
+                // TODO: construct an Application and add it to self.apps, then watch the application with the sender in param
+                // TODO: I think you can only construct an application on the main thread and I don't think this block is guaranteed to be called on the main thread?
+
                 todo!()
-            } else if unsafe { &*name == (NSWorkspaceDidActivateApplicationNotification) } {
+            } else if unsafe { &*name == NSWorkspaceDidActivateApplicationNotification } {
+                // TODO: I think this one has to do with focus
                 todo!()
-            } else if unsafe { &*name == (NSWorkspaceDidHideApplicationNotification) } {
+            } else if unsafe { &*name == NSWorkspaceDidHideApplicationNotification } {
+                // TODO: find windows corresponding to app and send hidden event
                 todo!()
-            } else if unsafe { &*name == (NSWorkspaceDidUnhideApplicationNotification) } {
+            } else if unsafe { &*name == NSWorkspaceDidUnhideApplicationNotification } {
+                // TODO: ^
                 todo!()
-            } else if unsafe { &*name == (NSWorkspaceActiveSpaceDidChangeNotification) } {
+            } else if unsafe { &*name == NSWorkspaceActiveSpaceDidChangeNotification } {
+                // TODO: this can cause many windows to go "hidden," so send the hidden events to the user
                 todo!()
-            } else if unsafe { &*name == (NSWorkspaceDidTerminateApplicationNotification) } {
+            } else if unsafe { &*name == NSWorkspaceDidTerminateApplicationNotification } {
+                // TODO: can we easily gather all windows for the app and remove them from the cache? (self.windows)
                 todo!()
             };
         })
@@ -119,6 +123,7 @@ impl WindowManager {
             // AppleInterfaceMenuBarHidingChangedNotification
         ];
 
+        let center = unsafe { NSNotificationCenter::defaultCenter() };
         for notification in GLOBAL_NOTIFICATIONS {
             unsafe {
                 center.addObserverForName_object_queue_usingBlock(
@@ -132,47 +137,8 @@ impl WindowManager {
     }
 }
 
-// TODO: how will I keep track of windows, what data type are window ids?
 impl WindowManagerBackend for WindowManager {
-    fn show_window(&self, id: WindowId) {
-        todo!()
-    }
-
-    fn hide_window(&self, id: WindowId) {
-        todo!()
-    }
-
-    fn focus_window(&self, id: WindowId) {
-        todo!()
-    }
-
-    fn move_window(&self, id: WindowId, position: Position) {
-        // AXUIElementSetAttributeValue
-        // kAXPositionAttribute
-        todo!()
-    }
-
-    fn resize_window(&self, id: WindowId, size: Size) {
-        todo!()
+    fn get_window(&self, id: WindowId) -> Option<&Window> {
+        self.windows.get(&id)
     }
 }
-
-// TODO: using selector-based API
-// declare_class!(
-//     struct TODO;
-
-//     unsafe impl ClassType for TODO {
-//         type Super = NSObject;
-//         type Mutability = mutability::Immutable;
-//         const NAME: &'static str = "TODO";
-//     }
-
-//     unsafe impl TODO {
-//         #[method(global_notification:)]
-//         fn global_notification(&self, notification: &NSNotification) {}
-//     }
-// );
-
-// fn global_notification(notification: NonNull<NSNotification>) {
-// TODO: the notification object can store data (such as the sender)
-// }

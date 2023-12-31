@@ -2,17 +2,20 @@ use std::{mem::MaybeUninit, time::Instant};
 
 use crossbeam::channel::Sender;
 
-use crate::protocol::{WindowEvent, WindowEventInfo};
+use crate::{
+    protocol::{WindowEvent, WindowEventInfo},
+    sys::platform::ffi::{CFArrayGetCount, CFArrayGetValueAtIndex},
+};
 
 use super::{
     ffi::{
-        cfstring_from_str, kAXErrorSuccess, kAXFocusedWindowChangedNotification,
+        cfarray_to_vec, cfstring_from_str, kAXErrorSuccess, kAXFocusedWindowChangedNotification,
         kAXMovedNotification, kAXTitleChangedNotification, kAXUIElementDestroyedNotification,
         kAXWindowCreatedNotification, kAXWindowDeminiaturizedNotification,
         kAXWindowMiniaturizedNotification, kAXWindowsAttribute, kCFRunLoopDefaultMode, pid_t,
         AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
         AXObserverRemoveNotification, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
-        AXUIElementRef, CFEqual, CFRelease, CFRunLoopAddSource, CFRunLoopGetMain,
+        AXUIElementRef, CFArrayRef, CFEqual, CFRelease, CFRunLoopAddSource, CFRunLoopGetMain,
         CFRunLoopSourceInvalidate, CFStringRef,
     },
     window::Window,
@@ -55,24 +58,38 @@ impl Application {
         }
     }
 
-    pub fn windows(&self) {
-        let mut windows = MaybeUninit::uninit();
+    // TODO: I can return a custom struct that wraps the CFArrayRef to avoid copying, or even better, return an iterator
+    pub fn windows(&self) -> Result<Vec<Window>, ()> {
+        let mut windows: MaybeUninit<CFArrayRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
                 self.inner,
                 cfstring_from_str(kAXWindowsAttribute),
-                windows.as_mut_ptr(),
+                windows.as_mut_ptr() as *mut _,
             )
         };
-        // TODO: errors
         if result == kAXErrorSuccess {
-            // should be a CFArray
-            let windows = unsafe { windows.assume_init() };
-            // TODO: window struct?
+            let cfarray = unsafe { windows.assume_init() };
+
+            let len = unsafe { CFArrayGetCount(cfarray) };
+            let mut windows = Vec::with_capacity(len as usize);
+            for i in 0..len {
+                let element = unsafe { CFArrayGetValueAtIndex(cfarray, i) } as AXUIElementRef;
+                windows.push(Window::new(element));
+            }
+
+            unsafe {
+                CFRelease(cfarray as *const _);
+            }
+
+            Ok(windows)
+        } else {
+            // TODO
+            Err(())
         }
     }
 
-    pub fn observe(&self, sender: Sender<WindowEventInfo>) {
+    pub fn watch(&self, sender: Sender<WindowEventInfo>) {
         for notification in APP_NOTIFICATIONS {
             let result = unsafe {
                 AXObserverAddNotification(
@@ -100,7 +117,7 @@ impl Application {
     }
 
     // TODO: call on app terminated?
-    pub fn unobserve(&self) {
+    pub fn unwatch(&self) {
         for notification in APP_NOTIFICATIONS {
             let result = unsafe {
                 AXObserverRemoveNotification(
@@ -132,7 +149,7 @@ impl Drop for Application {
 }
 
 unsafe extern "C" fn app_notification(
-    observer: AXObserverRef,
+    _observer: AXObserverRef,
     element: AXUIElementRef,
     notification: CFStringRef,
     refcon: *mut ::std::os::raw::c_void,
@@ -145,8 +162,6 @@ unsafe extern "C" fn app_notification(
         cfstring_from_str(kAXWindowCreatedNotification) as *const _,
     ) != 0
     {
-        // TODO: use AXUIElementCopyAttributeValue
-
         WindowEvent::Opened
     } else if CFEqual(
         notification as *const _,

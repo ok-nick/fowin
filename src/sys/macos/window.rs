@@ -1,23 +1,26 @@
 use std::mem::MaybeUninit;
 
-use icrate::Foundation::CGPoint;
+use icrate::Foundation::{CGPoint, CGSize};
 
 use crate::protocol::{Position, Size, WindowId};
 
 use super::ffi::{
     cfstring_from_str, cfstring_to_string, kAXErrorSuccess, kAXFullScreenAttribute,
-    kAXMinimizedAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXTitleAttribute,
-    kAXValueTypeCGSize, AXUIElementCopyAttributeValue, AXUIElementGetWindow, AXUIElementRef,
-    AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef, CFRelease, CFStringRef,
-    CFTypeRef, CGSize,
+    kAXMinimizedAttribute, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
+    kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse, kCFBooleanTrue,
+    AXUIElementCopyAttributeValue, AXUIElementGetWindow, AXUIElementPerformAction, AXUIElementRef,
+    AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
+    CFRelease, CFStringRef, CFTypeRef,
 };
 
 #[derive(Debug)]
 pub struct Window {
+    // TODO: this is reference counted, impl clone for axuielementref that internally increases the ref count
     inner: AXUIElementRef,
 }
 
 // TODO: create a trait for this
+// TODO: reduce boilerplate between some of these methods
 impl Window {
     pub fn new(inner: AXUIElementRef) -> Window {
         Window { inner }
@@ -138,8 +141,7 @@ impl Window {
         }
     }
 
-    // aka minimized
-    pub fn hidden(&self) -> Result<bool, ()> {
+    pub fn minimized(&self) -> Result<bool, ()> {
         let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::zeroed();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -157,6 +159,129 @@ impl Window {
             };
             Ok(hidden != 0)
         } else {
+            Err(())
+        }
+    }
+
+    pub fn visible(&self) -> Result<bool, ()> {
+        // TODO: returns if this window is visible, by means of app->hidden? and window->minimized
+        // also check if window size > 0?
+        todo!()
+    }
+
+    pub fn exists(&self) -> Result<bool, ()> {
+        // TODO: returns if this window still exists, usually this is done by seeing if one of the attribute setting functions fail
+        todo!()
+    }
+
+    pub fn resize(&self, size: Size) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXSizeAttribute),
+                &CGSize::new(size.width, size.height) as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    pub fn r#move(&mut self, position: Position) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXPositionAttribute),
+                &CGPoint::new(position.x, position.y) as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    pub fn fullscreen(&mut self) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXFullScreenAttribute),
+                &kCFBooleanTrue as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    pub fn unfullscreen(&mut self) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXFullScreenAttribute),
+                &kCFBooleanFalse as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    // aka fullscreen without hiding dock/menu bar
+    pub fn fullscreen_windowed(&self) {
+        // TODO: calls move and resize, it is the users choice to bring to front and focus
+    }
+
+    pub fn maximize(&self) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXMinimizedAttribute),
+                &kCFBooleanFalse as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    pub fn minimize(&self) -> Result<(), ()> {
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner,
+                cfstring_from_str(kAXMinimizedAttribute),
+                &kCFBooleanTrue as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
+            Err(())
+        }
+    }
+
+    pub fn bring_to_front(&self) -> Result<(), ()> {
+        let result =
+            unsafe { AXUIElementPerformAction(self.inner, cfstring_from_str(kAXRaiseAction)) };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            // TODO
             Err(())
         }
     }

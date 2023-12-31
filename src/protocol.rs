@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::sys::Window;
 
 pub type WindowId = u32;
+// pub type DisplayId = u32;
 
 #[derive(Debug)]
 pub struct Position {
@@ -83,24 +84,16 @@ pub trait WindowManagerBackend {
     // NOTE: komorebi doesn't listen to EVENT_OBJECT_CREATE because "some apps like firefox" don't send them
     // https://github.com/LGUG2Z/komorebi/blob/42ac13e0bd24c2775874cac891826024054e4e3c/komorebi/src/window_manager_event.rs#L127
 
-    // NOTE: on windows the events are not processed in the correct order, This should be handled on the windows backend, and if needbe, the windows backend should buffer events every 0.x seconds so every event is processed in order (read komorebi server for more)
-    // fn event_receiver(&self) -> Receiver<WindowEvent>;
-
-    fn show_window(&self, id: WindowId);
-
-    fn hide_window(&self, id: WindowId);
-
-    fn focus_window(&self, id: WindowId);
-
-    fn move_window(&self, id: WindowId, position: Position);
-
-    fn resize_window(&self, id: WindowId, size: Size);
-
-    // NOTE: returns the displays screen resolution so that the backend can calculate window positions relative to it
+    // TODO: these options, while useful, are out of scope for this project?
     // fn resolution(&self, id: DisplayId) -> Size;
-
-    // NOTE: this returns the position of the display relative to other displays, used when finding the focus cross-display
+    // // returns the display position relative to other displays
     // fn position(&self, id: DisplayId) -> Position;
+
+    fn get_window(&self, id: WindowId) -> Option<&Window>;
+}
+
+pub trait WindowBackend {
+    // TODO: impl all the window methods
 }
 
 // event can either happen on event or after event (assume after event)
@@ -123,3 +116,5 @@ pub struct WindowEventInfo {
     pub timestamp: Instant,
     pub window: Window,
 }
+
+pub enum WindowError {}

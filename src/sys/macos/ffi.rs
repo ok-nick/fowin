@@ -3,11 +3,15 @@
 #![allow(non_snake_case)]
 #![allow(unused)]
 
-// TODO: use bindgen?
+// TODO: eventual goal is to replace everything here with icrate once they get everything sorted out
 // inspiration: https://github.com/dimusic/active-win-pos-rs/tree/main
 // and: https://github.com/eiz/accessibility/tree/master/accessibility-sys
+// https://github.com/wusyong/carbon-bindgen/blob/467fca5d71047050b632fbdfb41b1f14575a8499/bindings.rs
 
-use std::ffi::{c_char, CStr, CString};
+use std::{
+    ffi::{c_char, CStr, CString},
+    mem,
+};
 
 use icrate::objc2::msg_send;
 
@@ -24,6 +28,8 @@ pub const kAXFocusedWindowAttribute: &str = "AXFocusedWindow";
 pub const kAXCloseButtonAttribute: &str = "AXCloseButton";
 pub const kAXFullScreenButtonAttribute: &str = "AXFullScreenButton";
 pub const kAXFullScreenAttribute: &str = "AXFullScreen";
+pub const kAXHiddenAttribute: &str = "AXHidden";
+pub const kAXRaiseAction: &str = "AXRaise";
 
 pub const kAXWindowCreatedNotification: &str = "AXWindowCreated";
 pub const kAXUIElementDestroyedNotification: &str = "AXUIElementDestroyed";
@@ -57,6 +63,7 @@ pub const kCFStringEncodingUTF8: _bindgen_ty_15 = 134217984;
 pub type CFDictionaryRef = *const __CFDictionary;
 pub const kAXValueTypeCGSize: _bindgen_ty_1575 = 2;
 pub const kAXValueTypeCGPoint: _bindgen_ty_1575 = 1;
+pub type CFArrayRef = *const __CFArray;
 
 pub type AXUIElementRef = *const __AXUIElement;
 pub type AXObserverRef = *mut __AXObserver;
@@ -84,6 +91,12 @@ pub type CFRunLoopMode = CFStringRef;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct __CFArray {
+    _unused: [u8; 0],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct __CFBoolean {
     _unused: [u8; 0],
 }
@@ -92,13 +105,6 @@ pub struct __CFBoolean {
 #[derive(Debug, Copy, Clone)]
 pub struct __AXValue {
     _unused: [u8; 0],
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CGSize {
-    pub width: CGFloat,
-    pub height: CGFloat,
 }
 
 #[repr(C)]
@@ -131,6 +137,10 @@ pub struct __AXUIElement {
     _unused: [u8; 0],
 }
 
+// TODO: accessibilty objects cannot be shared or sent across threads (enable negative impl feature])
+// impl !Send for __AXUIElement {}
+// impl !Syncfor __AXUIElement {}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct __AXObserver {
@@ -147,6 +157,8 @@ pub struct __CFRunLoopSource {
 extern "C" {
     pub static kCFAllocatorDefault: CFAllocatorRef;
     pub static kCFRunLoopDefaultMode: CFRunLoopMode;
+    pub static kCFBooleanTrue: CFBooleanRef;
+    pub static kCFBooleanFalse: CFBooleanRef;
 
     pub fn AXUIElementCreateApplication(pid: pid_t) -> AXUIElementRef;
 
@@ -231,6 +243,17 @@ extern "C" {
     ) -> Boolean;
 
     pub fn CFBooleanGetValue(boolean: CFBooleanRef) -> Boolean;
+
+    pub fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
+
+    pub fn CFArrayGetCount(theArray: CFArrayRef) -> CFIndex;
+
+    pub fn CFArrayGetValueAtIndex(
+        theArray: CFArrayRef,
+        idx: CFIndex,
+    ) -> *const ::std::os::raw::c_void;
+
+    pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
 }
 
 // TODO: verify correctness
@@ -285,5 +308,21 @@ pub fn cfstring_to_string(cfstring: CFStringRef) -> Option<String> {
         } else {
             None
         }
+    }
+}
+
+pub fn cfarray_to_vec<T>(cfarray: CFArrayRef) -> Vec<T> {
+    let len = unsafe { CFArrayGetCount(cfarray) };
+    let mut vec = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        let element = unsafe { CFArrayGetValueAtIndex(cfarray, i) };
+        vec.push(element);
+    }
+
+    unsafe {
+        CFRelease(cfarray as *const _);
+
+        // the most diabolical unsafeness ever
+        mem::transmute(vec)
     }
 }
