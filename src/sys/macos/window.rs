@@ -2,20 +2,25 @@ use std::mem::MaybeUninit;
 
 use icrate::Foundation::{CGPoint, CGSize};
 
-use crate::protocol::{Position, Size, WindowId};
+use crate::protocol::{Position, Size, WindowError, WindowId};
 
 use super::ffi::{
-    cfstring_from_str, cfstring_to_string, kAXErrorSuccess, kAXFullScreenAttribute,
-    kAXMinimizedAttribute, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
-    kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse, kCFBooleanTrue,
-    AXUIElementCopyAttributeValue, AXUIElementGetWindow, AXUIElementPerformAction, AXUIElementRef,
+    self, cfstring_from_str, cfstring_to_string, kAXErrorIllegalArgument, kAXErrorNoValue,
+    kAXErrorSuccess, kAXFullScreenAttribute, kAXMinimizedAttribute, kAXPositionAttribute,
+    kAXRaiseAction, kAXSizeAttribute, kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse,
+    kCFBooleanTrue, AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
     AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
-    CFRelease, CFStringRef, CFTypeRef,
+    CFRelease, CFRetain, CFStringRef, CFTypeRef, _AXUIElementGetWindow,
 };
 
-#[derive(Debug)]
+// NOTE: this is safe to pass between threads (although perhaps not safe to query between threads?)
+//       TLDR; it's a pointer for another process (or an ID depending on the backend framework)
+//       https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00042.html
+// NOTE: according to the URL below, it may be safe to use on different threads as long as it's only
+//       being used by one thread at a time
+//       https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Multithreading/ThreadSafetySummary/ThreadSafetySummary.html
+#[derive(Debug, Clone, Copy)]
 pub struct Window {
-    // TODO: this is reference counted, impl clone for axuielementref that internally increases the ref count
     inner: AXUIElementRef,
 }
 
@@ -26,17 +31,18 @@ impl Window {
         Window { inner }
     }
 
-    pub fn id(&self) -> Result<WindowId, ()> {
+    pub fn id(&self) -> Result<WindowId, WindowError> {
         let mut id = MaybeUninit::zeroed();
-        let result = unsafe { AXUIElementGetWindow(self.inner, id.as_mut_ptr()) };
+        let result = unsafe { _AXUIElementGetWindow(self.inner, id.as_mut_ptr()) };
         if result == kAXErrorSuccess {
             Ok(unsafe { id.assume_init() })
         } else {
-            Err(())
+            // as this is a private API, there is no formal specification for what errors may be returned
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn title(&self) -> Result<String, ()> {
+    pub fn title(&self) -> Result<String, WindowError> {
         let mut title: MaybeUninit<CFStringRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -46,18 +52,20 @@ impl Window {
             )
         };
         if result == kAXErrorSuccess {
-            cfstring_to_string(unsafe { title.assume_init() }).ok_or(())
+            cfstring_to_string(unsafe { title.assume_init() })
+                // TODO: different error type? it says it errors if the "conversion fails" or the buffer is too small. I believe with these paramters it should always succeed
+                .ok_or(WindowError::InvalidInternalArgument)
         } else {
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    // TODO: can't do this here, needs to be done globally
+    // TODO: can I do this here? it would be most logical..
     // pub fn focused(&self) -> u32 {
     //     todo!()
     // }
 
-    pub fn size(&self) -> Result<Size, ()> {
+    pub fn size(&self) -> Result<Size, WindowError> {
         let mut size: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -70,12 +78,15 @@ impl Window {
             let mut frame: MaybeUninit<CGSize> = MaybeUninit::zeroed();
             unsafe {
                 let value = size.assume_init();
-                AXValueGetValue(
+                let result = AXValueGetValue(
                     value as AXValueRef, // TODO: sure this works?
                     kAXValueTypeCGSize,
                     frame.as_mut_ptr() as *mut _,
                 );
                 CFRelease(value);
+                if result == 0 {
+                    return Err(WindowError::InvalidInternalArgument);
+                }
             }
 
             let frame = unsafe { frame.assume_init() };
@@ -84,11 +95,11 @@ impl Window {
                 height: frame.height,
             })
         } else {
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn position(&self) -> Result<Position, ()> {
+    pub fn position(&self) -> Result<Position, WindowError> {
         let mut position: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -107,6 +118,9 @@ impl Window {
                     frame.as_mut_ptr() as *mut _,
                 );
                 CFRelease(value);
+                if result == 0 {
+                    return Err(WindowError::InvalidInternalArgument);
+                }
             }
 
             let frame = unsafe { frame.assume_init() };
@@ -115,11 +129,11 @@ impl Window {
                 y: frame.y,
             })
         } else {
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn fullscreened(&self) -> Result<bool, ()> {
+    pub fn fullscreened(&self) -> Result<bool, WindowError> {
         let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::zeroed();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -137,11 +151,11 @@ impl Window {
             };
             Ok(fullscreened != 0)
         } else {
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn minimized(&self) -> Result<bool, ()> {
+    pub fn minimized(&self) -> Result<bool, WindowError> {
         let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::zeroed();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -159,22 +173,23 @@ impl Window {
             };
             Ok(hidden != 0)
         } else {
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn visible(&self) -> Result<bool, ()> {
+    pub fn visible(&self) -> Result<bool, WindowError> {
         // TODO: returns if this window is visible, by means of app->hidden? and window->minimized
         // also check if window size > 0?
+        // another thing to take into consideration is if the display is off or if it's on a visible (macos) space
         todo!()
     }
 
-    pub fn exists(&self) -> Result<bool, ()> {
+    pub fn exists(&self) -> Result<bool, WindowError> {
         // TODO: returns if this window still exists, usually this is done by seeing if one of the attribute setting functions fail
         todo!()
     }
 
-    pub fn resize(&self, size: Size) -> Result<(), ()> {
+    pub fn resize(&self, size: Size) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -185,12 +200,11 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn r#move(&mut self, position: Position) -> Result<(), ()> {
+    pub fn translate(&mut self, position: Position) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -201,12 +215,11 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn fullscreen(&mut self) -> Result<(), ()> {
+    pub fn fullscreen(&mut self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -217,12 +230,11 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn unfullscreen(&mut self) -> Result<(), ()> {
+    pub fn unfullscreen(&mut self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -233,17 +245,19 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    // aka fullscreen without hiding dock/menu bar
-    pub fn fullscreen_windowed(&self) {
-        // TODO: calls move and resize, it is the users choice to bring to front and focus
+    // bordered fullscreen AKA make window size of screen
+    pub fn maximize(&self) -> Result<(), WindowError> {
+        // TODO: calls move and resize, but how should we decide which display to do it for? add param?
+        todo!()
     }
 
-    pub fn maximize(&self) -> Result<(), ()> {
+    // TODO: this is a WINDOW handling library, not an application handling
+    //       if the application is hidden, then show the application and hide other windows besides this one
+    pub fn show(&self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -254,12 +268,12 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn minimize(&self) -> Result<(), ()> {
+    pub fn hide(&self) -> Result<(), WindowError> {
+        // TODO: hide this window, minimizing is the best bet
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner,
@@ -270,19 +284,17 @@ impl Window {
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 
-    pub fn bring_to_front(&self) -> Result<(), ()> {
+    pub fn bring_to_front(&self) -> Result<(), WindowError> {
         let result =
             unsafe { AXUIElementPerformAction(self.inner, cfstring_from_str(kAXRaiseAction)) };
         if result == kAXErrorSuccess {
             Ok(())
         } else {
-            // TODO
-            Err(())
+            Err(WindowError::from_ax_error(result))
         }
     }
 }

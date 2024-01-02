@@ -5,9 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-# TODO: only need crossbeam-channel
-crossbeam = "0.8.2"
-once_cell = "1.19.0"
+crossbeam-channel = "0.5.10"
 icrate = { version = "0.0.4", features = [
   "AppKit",
   "AppKit_NSWorkspace",

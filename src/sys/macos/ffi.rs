@@ -15,7 +15,22 @@ use std::{
 
 use icrate::objc2::msg_send;
 
-pub const kAXErrorSuccess: _bindgen_ty_1571 = 0;
+pub const kAXErrorSuccess: i32 = 0;
+pub const kAXErrorFailure: i32 = -25200;
+pub const kAXErrorIllegalArgument: i32 = -25201;
+pub const kAXErrorInvalidUIElement: i32 = -25202;
+pub const kAXErrorInvalidUIElementObserver: i32 = -25203;
+pub const kAXErrorCannotComplete: i32 = -25204;
+pub const kAXErrorAttributeUnsupported: i32 = -25205;
+pub const kAXErrorActionUnsupported: i32 = -25206;
+pub const kAXErrorNotificationUnsupported: i32 = -25207;
+pub const kAXErrorNotImplemented: i32 = -25208;
+pub const kAXErrorNotificationAlreadyRegistered: i32 = -25209;
+pub const kAXErrorNotificationNotRegistered: i32 = -25210;
+pub const kAXErrorAPIDisabled: i32 = -25211;
+pub const kAXErrorNoValue: i32 = -25212;
+pub const kAXErrorParameterizedAttributeUnsupported: i32 = -25213;
+pub const kAXErrorNotEnoughPrecision: i32 = -25214;
 
 pub const kAXFocusedUIElementAttribute: &str = "AXFocusedUIElement";
 pub const kAXWindowAttribute: &str = "AXWindow";
@@ -31,6 +46,9 @@ pub const kAXFullScreenAttribute: &str = "AXFullScreen";
 pub const kAXHiddenAttribute: &str = "AXHidden";
 pub const kAXRaiseAction: &str = "AXRaise";
 
+pub const kAXResizedNotification: &str = "AXResized";
+pub const kAXApplicationHiddenNotification: &str = "AXApplicationHidden";
+pub const kAXApplicationShownNotification: &str = "AXApplicationShown";
 pub const kAXWindowCreatedNotification: &str = "AXWindowCreated";
 pub const kAXUIElementDestroyedNotification: &str = "AXUIElementDestroyed";
 pub const kAXWindowMiniaturizedNotification: &str = "AXWindowMiniaturized";
@@ -39,6 +57,8 @@ pub const kAXFocusedWindowChangedNotification: &str = "AXFocusedWindowChanged";
 pub const kAXMovedNotification: &str = "AXMoved";
 pub const kAXTitleChangedNotification: &str = "AXTitleChanged";
 
+pub type CGWindowID = u32;
+pub type CFHashCode = ::std::os::raw::c_ulong;
 pub type _bindgen_ty_1571 = ::std::os::raw::c_int;
 pub type UInt8 = ::std::os::raw::c_uchar;
 pub type __int32_t = ::std::os::raw::c_int;
@@ -50,6 +70,7 @@ pub type _bindgen_ty_1575 = ::std::os::raw::c_uint;
 pub type CGFloat = f64;
 pub type CFBooleanRef = *const __CFBoolean;
 
+pub type CFMutableDictionaryRef = *mut __CFDictionary;
 pub type AXValueRef = *const __AXValue;
 pub type AXValueType = UInt32;
 pub type __darwin_pid_t = __int32_t;
@@ -65,7 +86,11 @@ pub const kAXValueTypeCGSize: _bindgen_ty_1575 = 2;
 pub const kAXValueTypeCGPoint: _bindgen_ty_1575 = 1;
 pub type CFArrayRef = *const __CFArray;
 
-pub type AXUIElementRef = *const __AXUIElement;
+#[derive(Debug, Clone, Copy)]
+pub struct AXUIElementRef(pub *const __AXUIElement);
+unsafe impl Sync for AXUIElementRef {}
+unsafe impl Send for AXUIElementRef {}
+
 pub type AXObserverRef = *mut __AXObserver;
 pub type AXObserverCallbackWithInfo = ::std::option::Option<
     unsafe extern "C" fn(
@@ -88,6 +113,27 @@ pub type AXError = SInt32;
 pub type CFRunLoopSourceRef = *mut __CFRunLoopSource;
 pub type CFRunLoopRef = *mut __CFRunLoop;
 pub type CFRunLoopMode = CFStringRef;
+
+pub type CFDictionaryRetainCallBack = ::std::option::Option<
+    unsafe extern "C" fn(
+        allocator: CFAllocatorRef,
+        value: *const ::std::os::raw::c_void,
+    ) -> *const ::std::os::raw::c_void,
+>;
+pub type CFDictionaryReleaseCallBack = ::std::option::Option<
+    unsafe extern "C" fn(allocator: CFAllocatorRef, value: *const ::std::os::raw::c_void),
+>;
+pub type CFDictionaryCopyDescriptionCallBack = ::std::option::Option<
+    unsafe extern "C" fn(value: *const ::std::os::raw::c_void) -> CFStringRef,
+>;
+pub type CFDictionaryEqualCallBack = ::std::option::Option<
+    unsafe extern "C" fn(
+        value1: *const ::std::os::raw::c_void,
+        value2: *const ::std::os::raw::c_void,
+    ) -> Boolean,
+>;
+pub type CFDictionaryHashCallBack =
+    ::std::option::Option<unsafe extern "C" fn(value: *const ::std::os::raw::c_void) -> CFHashCode>;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -153,12 +199,34 @@ pub struct __CFRunLoopSource {
     _unused: [u8; 0],
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CFDictionaryKeyCallBacks {
+    pub version: CFIndex,
+    pub retain: CFDictionaryRetainCallBack,
+    pub release: CFDictionaryReleaseCallBack,
+    pub copyDescription: CFDictionaryCopyDescriptionCallBack,
+    pub equal: CFDictionaryEqualCallBack,
+    pub hash: CFDictionaryHashCallBack,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CFDictionaryValueCallBacks {
+    pub version: CFIndex,
+    pub retain: CFDictionaryRetainCallBack,
+    pub release: CFDictionaryReleaseCallBack,
+    pub copyDescription: CFDictionaryCopyDescriptionCallBack,
+    pub equal: CFDictionaryEqualCallBack,
+}
+
 // #[link(name = "Carbon", kind = "framework")]
 extern "C" {
     pub static kCFAllocatorDefault: CFAllocatorRef;
     pub static kCFRunLoopDefaultMode: CFRunLoopMode;
     pub static kCFBooleanTrue: CFBooleanRef;
     pub static kCFBooleanFalse: CFBooleanRef;
+    pub static mut kAXTrustedCheckOptionPrompt: CFStringRef;
 
     pub fn AXUIElementCreateApplication(pid: pid_t) -> AXUIElementRef;
 
@@ -220,7 +288,8 @@ extern "C" {
     ) -> AXError;
 
     // PRIVATE API
-    pub fn AXUIElementGetWindow(element: AXUIElementRef, identifier: *mut u32) -> i32;
+    // TODO: p sure the "identifier" is a pointer to a CGWindowId?
+    pub fn _AXUIElementGetWindow(element: AXUIElementRef, identifier: *mut CGWindowID) -> i32;
 
     pub fn CFStringGetLength(theString: CFStringRef) -> CFIndex;
 
@@ -254,6 +323,27 @@ extern "C" {
     ) -> *const ::std::os::raw::c_void;
 
     pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+
+    pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
+
+    pub fn AXIsProcessTrusted() -> Boolean;
+
+    pub fn CFDictionarySetValue(
+        theDict: CFMutableDictionaryRef,
+        key: *const ::std::os::raw::c_void,
+        value: *const ::std::os::raw::c_void,
+    );
+
+    pub fn CFDictionaryCreate(
+        allocator: CFAllocatorRef,
+        keys: *mut *const ::std::os::raw::c_void,
+        values: *mut *const ::std::os::raw::c_void,
+        numValues: CFIndex,
+        keyCallBacks: *const CFDictionaryKeyCallBacks,
+        valueCallBacks: *const CFDictionaryValueCallBacks,
+    ) -> CFDictionaryRef;
+
+    pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
 }
 
 // TODO: verify correctness
