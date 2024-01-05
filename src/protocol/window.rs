@@ -69,19 +69,19 @@ impl Window {
 
     /// Change the position of the window.
     #[inline]
-    pub fn translate(&mut self, position: Position) -> Result<(), WindowError> {
+    pub fn translate(&self, position: Position) -> Result<(), WindowError> {
         self.0.translate(position)
     }
 
     /// Fullscreen the window.
     #[inline]
-    pub fn fullscreen(&mut self) -> Result<(), WindowError> {
+    pub fn fullscreen(&self) -> Result<(), WindowError> {
         self.0.fullscreen()
     }
 
     /// Unfullscreen the window.
     #[inline]
-    pub fn unfullscreen(&mut self) -> Result<(), WindowError> {
+    pub fn unfullscreen(&self) -> Result<(), WindowError> {
         self.0.unfullscreen()
     }
 

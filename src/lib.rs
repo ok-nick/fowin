@@ -1,3 +1,5 @@
+#![feature(mutex_unpoison)]
+
 use protocol::WindowEvent;
 pub use protocol::{Position, Size, Window, WindowError, WindowEventKind, WindowId};
 
@@ -39,7 +41,7 @@ pub fn trusted() -> bool {
 ///
 /// This option may open a prompt for the user to accept.
 #[inline]
-pub fn request_trust() -> bool {
+pub fn request_trust() -> Result<bool, WindowError> {
     sys::request_trust()
 }
 

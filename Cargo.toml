@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# TODO: setup workspace
+
 [dependencies]
 crossbeam-channel = "0.5.10"
 icrate = { version = "0.0.4", features = [

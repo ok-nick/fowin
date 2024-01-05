@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, time::Instant};
+use std::{marker::PhantomData, mem::MaybeUninit, time::Instant};
 
 use crossbeam_channel::Sender;
 
@@ -17,8 +17,8 @@ use super::{
         kAXWindowsAttribute, kCFRunLoopDefaultMode, pid_t, AXObserverAddNotification,
         AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef, AXObserverRemoveNotification,
         AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, CFArrayRef,
-        CFEqual, CFRelease, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopGetMain,
-        CFRunLoopSourceInvalidate, CFStringRef, __AXUIElement,
+        CFEqual, CFGetRetainCount, CFRelease, CFRetain, CFRunLoopAddSource, CFRunLoopGetCurrent,
+        CFRunLoopGetMain, CFRunLoopSourceInvalidate, CFStringRef, __AXObserver, __AXUIElement,
     },
     window::Window,
 };
@@ -41,9 +41,39 @@ const APP_NOTIFICATIONS: [&str; 10] = [
     kAXApplicationHiddenNotification,
 ];
 
+// TODO: how does it behave when Window drops the inner AXUIElementRef?
+#[derive(Debug)]
+pub struct WindowIterator<'a> {
+    inner: CFArrayRef,
+    len: i64,
+    index: i64,
+    phantom: PhantomData<&'a ()>,
+}
+
+// impl<'a> Iterator for WindowIterator<'a> {
+//     type Item = Window;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.index < self.len {
+//             let window = Window::new(AXUIElementRef(unsafe {
+//                 CFArrayGetValueAtIndex(self.inner, self.index) as *const __AXUIElement
+//             }));
+
+//             self.index += 1;
+
+//             // TODO: temp unwrap
+//             Some(window.unwrap())
+//         } else {
+//             None
+//         }
+//     }
+// }
+
+// TODO: not sure if the AXUIElementRef is always valid, this thread is for windows:
+//     https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00045.html
 // TODO: UIElementRefs can be compared for equality using CFEqual, impl Eq for Window as well
 //       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Application {
     inner: AXUIElementRef,
     // TODO: is this thread-safe?? It's a CFType
@@ -59,8 +89,8 @@ impl Application {
             unsafe { AXObserverCreate(pid, Some(app_notification), observer.as_mut_ptr()) };
         if result == kAXErrorSuccess {
             Ok(Application {
-                inner: element,
-                observer: unsafe { observer.assume_init() },
+                inner: AXUIElementRef(element),
+                observer: AXObserverRef(unsafe { observer.assume_init() }),
                 pid,
             })
         } else {
@@ -69,44 +99,61 @@ impl Application {
     }
 
     // TODO: I can return a custom struct that wraps the CFArrayRef to avoid copying, or even better, return an iterator
-    // TODO: how does CGWindowListCopyWindowInfo compare?
-    pub fn windows(&self) -> Result<Vec<Window>, WindowError> {
-        let mut windows: MaybeUninit<CFArrayRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner,
-                cfstring_from_str(kAXWindowsAttribute),
-                windows.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let cfarray = unsafe { windows.assume_init() };
-
-            let len = unsafe { CFArrayGetCount(cfarray) };
-            let mut windows = Vec::with_capacity(len as usize);
-            for i in 0..len {
-                let element = AXUIElementRef(unsafe {
-                    CFArrayGetValueAtIndex(cfarray, i) as *const __AXUIElement
-                });
-                windows.push(Window::new(element));
-            }
-
-            unsafe {
-                CFRelease(cfarray as *const _);
-            }
-
-            Ok(windows)
-        } else {
-            Err(WindowError::from_ax_error(result))
+    pub fn windows(&self) -> Result<Vec<Result<Window, WindowError>>, WindowError> {
+        let raw_windows = raw_windows(&self.inner)?;
+        unsafe {
+            println!(
+                "CFARRAY_START: {}",
+                CFGetRetainCount(raw_windows as *const _)
+            );
         }
+
+        let len = unsafe { CFArrayGetCount(raw_windows) };
+        let mut windows = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let element =
+                AXUIElementRef(unsafe { CFArrayGetValueAtIndex(raw_windows, i) as *const _ })
+                    .clone();
+            // unsafe {
+            //     println!(
+            //         "AXUIElementRef_START: {}",
+            //         CFGetRetainCount(element as *const _)
+            //     );
+            // }
+            windows.push(Window::new(element, self.inner.clone()));
+        }
+
+        unsafe {
+            CFRelease(raw_windows as *const _);
+        }
+
+        // unsafe {
+        //     println!("CFARRAY_END: {}", CFGetRetainCount(raw_windows as *const _));
+        // }
+        // if !windows.is_empty() {
+        //     unsafe {
+        //         println!(
+        //             "AXUIElementRef_END: {}",
+        //             CFGetRetainCount(*windows.first().unwrap() as *const _)
+        //         );
+        //     }
+        // }
+
+        Ok(windows)
+        // Ok(WindowIterator {
+        //     inner: cfarray,
+        //     len: unsafe { CFArrayGetCount(cfarray) },
+        //     index: 0,
+        //     phantom: PhantomData,
+        // })
     }
 
     pub fn watch(&self, sender: Sender<WindowEvent>) -> Result<(), WindowError> {
         for notification in APP_NOTIFICATIONS {
             let result = unsafe {
                 AXObserverAddNotification(
-                    self.observer,
-                    self.inner,
+                    self.observer.0,
+                    self.inner.0,
                     cfstring_from_str(notification),
                     // TODO: CLEAN THIS UP ON DROP!!
                     Box::into_raw(Box::new(sender.clone())) as *mut _,
@@ -121,7 +168,7 @@ impl Application {
             CFRunLoopAddSource(
                 // TODO: read above window.rs struct, not sure if it must run on main thread?
                 CFRunLoopGetCurrent(),
-                AXObserverGetRunLoopSource(self.observer),
+                AXObserverGetRunLoopSource(self.observer.0),
                 kCFRunLoopDefaultMode,
             );
         }
@@ -134,8 +181,8 @@ impl Application {
         for notification in APP_NOTIFICATIONS {
             let result = unsafe {
                 AXObserverRemoveNotification(
-                    self.observer,
-                    self.inner,
+                    self.observer.0,
+                    self.inner.0,
                     // TODO: cache this
                     cfstring_from_str(notification),
                 )
@@ -146,30 +193,23 @@ impl Application {
         }
 
         unsafe {
-            CFRunLoopSourceInvalidate(AXObserverGetRunLoopSource(self.observer));
+            CFRunLoopSourceInvalidate(AXObserverGetRunLoopSource(self.observer.0));
         }
 
         Ok(())
     }
 }
 
-impl Drop for Application {
-    fn drop(&mut self) {
-        unsafe {
-            CFRelease(self.inner.0 as *const _);
-            CFRelease(self.observer as *const _);
-        }
-    }
-}
-
 unsafe extern "C" fn app_notification(
-    _observer: AXObserverRef,
-    element: AXUIElementRef,
+    _observer: *mut __AXObserver,
+    element: *const __AXUIElement,
     notification: CFStringRef,
     refcon: *mut ::std::os::raw::c_void,
 ) {
     let timestamp = Instant::now();
-    let window = Window::new(element);
+    // the clone is a cheeky way of calling CFRetain
+    // TODO: pass in the self.inner of app
+    let window = Window::new(AXUIElementRef(element.clone()), todo!());
 
     let kind = if CFEqual(
         notification as *const _,
@@ -241,7 +281,24 @@ unsafe extern "C" fn app_notification(
     // if error, then it was disconnected, thus, do nothing
     let _ = sender.send(WindowEvent::with_timestamp(
         kind,
-        protocol::Window(window),
+        // TODO: temp unwrap
+        protocol::Window(window.unwrap()),
         timestamp,
     ));
+}
+
+pub(super) fn raw_windows(inner: &AXUIElementRef) -> Result<CFArrayRef, WindowError> {
+    let mut windows: MaybeUninit<CFArrayRef> = MaybeUninit::uninit();
+    let result = unsafe {
+        AXUIElementCopyAttributeValue(
+            inner.0,
+            cfstring_from_str(kAXWindowsAttribute),
+            windows.as_mut_ptr() as *mut _,
+        )
+    };
+    if result == kAXErrorSuccess {
+        Ok(unsafe { windows.assume_init() })
+    } else {
+        Err(WindowError::from_ax_error(result))
+    }
 }

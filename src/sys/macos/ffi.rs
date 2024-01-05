@@ -86,16 +86,45 @@ pub const kAXValueTypeCGSize: _bindgen_ty_1575 = 2;
 pub const kAXValueTypeCGPoint: _bindgen_ty_1575 = 1;
 pub type CFArrayRef = *const __CFArray;
 
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug)]
 pub struct AXUIElementRef(pub *const __AXUIElement);
 unsafe impl Sync for AXUIElementRef {}
 unsafe impl Send for AXUIElementRef {}
+impl Clone for AXUIElementRef {
+    fn clone(&self) -> Self {
+        unsafe { AXUIElementRef(CFRetain(self.0 as *const _) as *const __AXUIElement) }
+    }
+}
+impl Drop for AXUIElementRef {
+    fn drop(&mut self) {
+        unsafe {
+            // CFRelease(self.0 as *const _);
+        }
+    }
+}
 
-pub type AXObserverRef = *mut __AXObserver;
+// TODO: ^ same here?
+#[repr(C)]
+#[derive(Debug)]
+pub struct AXObserverRef(pub *mut __AXObserver);
+impl Clone for AXObserverRef {
+    fn clone(&self) -> Self {
+        unsafe { AXObserverRef(CFRetain(self.0 as *mut _) as *mut __AXObserver) }
+    }
+}
+impl Drop for AXObserverRef {
+    fn drop(&mut self) {
+        unsafe {
+            CFRelease(self.0 as *const _ as *const _);
+        }
+    }
+}
+
 pub type AXObserverCallbackWithInfo = ::std::option::Option<
     unsafe extern "C" fn(
-        observer: AXObserverRef,
-        element: AXUIElementRef,
+        observer: *mut __AXObserver,
+        element: *const __AXUIElement,
         notification: CFStringRef,
         info: CFDictionaryRef,
         refcon: *mut ::std::os::raw::c_void,
@@ -103,8 +132,8 @@ pub type AXObserverCallbackWithInfo = ::std::option::Option<
 >;
 pub type AXObserverCallback = ::std::option::Option<
     unsafe extern "C" fn(
-        observer: AXObserverRef,
-        element: AXUIElementRef,
+        observer: *mut __AXObserver,
+        element: *const __AXUIElement,
         notification: CFStringRef,
         refcon: *mut ::std::os::raw::c_void,
     ),
@@ -183,10 +212,6 @@ pub struct __AXUIElement {
     _unused: [u8; 0],
 }
 
-// TODO: accessibilty objects cannot be shared or sent across threads (enable negative impl feature])
-// impl !Send for __AXUIElement {}
-// impl !Syncfor __AXUIElement {}
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct __AXObserver {
@@ -220,30 +245,93 @@ pub struct CFDictionaryValueCallBacks {
     pub equal: CFDictionaryEqualCallBack,
 }
 
-// #[link(name = "Carbon", kind = "framework")]
+pub type CFArrayRetainCallBack = ::std::option::Option<
+    unsafe extern "C" fn(
+        allocator: CFAllocatorRef,
+        value: *const ::std::os::raw::c_void,
+    ) -> *const ::std::os::raw::c_void,
+>;
+pub type CFArrayReleaseCallBack = ::std::option::Option<
+    unsafe extern "C" fn(allocator: CFAllocatorRef, value: *const ::std::os::raw::c_void),
+>;
+pub type CFArrayCopyDescriptionCallBack = ::std::option::Option<
+    unsafe extern "C" fn(value: *const ::std::os::raw::c_void) -> CFStringRef,
+>;
+pub type CFArrayEqualCallBack = ::std::option::Option<
+    unsafe extern "C" fn(
+        value1: *const ::std::os::raw::c_void,
+        value2: *const ::std::os::raw::c_void,
+    ) -> Boolean,
+>;
+
+pub type CGWindowListOption = u32;
+
+pub struct CFArrayCallBacks {
+    pub version: CFIndex,
+    pub retain: CFArrayRetainCallBack,
+    pub release: CFArrayReleaseCallBack,
+    pub copyDescription: CFArrayCopyDescriptionCallBack,
+    pub equal: CFArrayEqualCallBack,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct __CFNumber {
+    _unused: [u8; 0],
+}
+pub type CFNumberRef = *const __CFNumber;
+pub type CFNumberType = CFIndex;
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    pub static kCGWindowNumber: CFStringRef;
+    pub static kCGWindowStoreType: CFStringRef;
+    pub static kCGWindowLayer: CFStringRef;
+    pub static kCGWindowBounds: CFStringRef;
+    pub static kCGWindowSharingState: CFStringRef;
+    pub static kCGWindowAlpha: CFStringRef;
+    pub static kCGWindowOwnerPID: CFStringRef;
+    pub static kCGWindowMemoryUsage: CFStringRef;
+    pub static kCGWindowWorkspace: CFStringRef;
+    pub static kCGWindowOwnerName: CFStringRef;
+    pub static kCGWindowName: CFStringRef;
+    pub static kCGWindowIsOnscreen: CFStringRef;
+    pub static kCGWindowBackingLocationVideoMemory: CFStringRef;
+
+    pub fn CGWindowListCreateDescriptionFromArray(windowArray: CFArrayRef) -> CFArrayRef;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     pub static kCFAllocatorDefault: CFAllocatorRef;
     pub static kCFRunLoopDefaultMode: CFRunLoopMode;
     pub static kCFBooleanTrue: CFBooleanRef;
     pub static kCFBooleanFalse: CFBooleanRef;
-    pub static mut kAXTrustedCheckOptionPrompt: CFStringRef;
 
-    pub fn AXUIElementCreateApplication(pid: pid_t) -> AXUIElementRef;
+    pub fn CFGetRetainCount(cf: CFTypeRef) -> CFIndex;
 
-    pub fn AXObserverCreate(
-        application: pid_t,
-        callback: AXObserverCallback,
-        outObserver: *mut AXObserverRef,
-    ) -> AXError;
+    pub fn CFNumberGetValue(
+        number: CFNumberRef,
+        theType: CFNumberType,
+        valuePtr: *mut ::std::os::raw::c_void,
+    ) -> Boolean;
 
-    pub fn AXObserverAddNotification(
-        observer: AXObserverRef,
-        element: AXUIElementRef,
-        notification: CFStringRef,
-        refcon: *mut ::std::os::raw::c_void,
-    ) -> AXError;
+    pub fn CFArrayCreate(
+        allocator: CFAllocatorRef,
+        values: *mut *const ::std::os::raw::c_void,
+        numValues: CFIndex,
+        callBacks: *const CFArrayCallBacks,
+    ) -> CFArrayRef;
 
-    pub fn AXObserverGetRunLoopSource(observer: AXObserverRef) -> CFRunLoopSourceRef;
+    pub fn CFDictionaryGetValue(
+        theDict: CFDictionaryRef,
+        key: *const ::std::os::raw::c_void,
+    ) -> *const ::std::os::raw::c_void;
+
+    pub fn CGWindowListCopyWindowInfo(
+        option: CGWindowListOption,
+        relativeToWindow: CGWindowID,
+    ) -> CFArrayRef;
 
     pub fn CFStringCreateWithBytes(
         alloc: CFAllocatorRef,
@@ -257,39 +345,13 @@ extern "C" {
 
     pub fn CFRunLoopGetMain() -> CFRunLoopRef;
 
-    pub fn AXObserverRemoveNotification(
-        observer: AXObserverRef,
-        element: AXUIElementRef,
-        notification: CFStringRef,
-    ) -> AXError;
-
     pub fn CFRunLoopSourceInvalidate(source: CFRunLoopSourceRef);
 
     pub fn CFRelease(cf: CFTypeRef);
 
-    pub fn AXUIElementSetAttributeValue(
-        element: AXUIElementRef,
-        attribute: CFStringRef,
-        value: CFTypeRef,
-    ) -> AXError;
-
-    pub fn AXUIElementCopyAttributeValue(
-        element: AXUIElementRef,
-        attribute: CFStringRef,
-        value: *mut CFTypeRef,
-    ) -> AXError;
+    pub fn CFBooleanGetValue(boolean: CFBooleanRef) -> Boolean;
 
     pub fn CFEqual(cf1: CFTypeRef, cf2: CFTypeRef) -> Boolean;
-
-    pub fn AXObserverCreateWithInfoCallback(
-        application: pid_t,
-        callback: AXObserverCallbackWithInfo,
-        outObserver: *mut AXObserverRef,
-    ) -> AXError;
-
-    // PRIVATE API
-    // TODO: p sure the "identifier" is a pointer to a CGWindowId?
-    pub fn _AXUIElementGetWindow(element: AXUIElementRef, identifier: *mut CGWindowID) -> i32;
 
     pub fn CFStringGetLength(theString: CFStringRef) -> CFIndex;
 
@@ -305,16 +367,6 @@ extern "C" {
         encoding: CFStringEncoding,
     ) -> Boolean;
 
-    pub fn AXValueGetValue(
-        value: AXValueRef,
-        theType: AXValueType,
-        valuePtr: *mut ::std::os::raw::c_void,
-    ) -> Boolean;
-
-    pub fn CFBooleanGetValue(boolean: CFBooleanRef) -> Boolean;
-
-    pub fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
-
     pub fn CFArrayGetCount(theArray: CFArrayRef) -> CFIndex;
 
     pub fn CFArrayGetValueAtIndex(
@@ -323,10 +375,6 @@ extern "C" {
     ) -> *const ::std::os::raw::c_void;
 
     pub fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
-
-    pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
-
-    pub fn AXIsProcessTrusted() -> Boolean;
 
     pub fn CFDictionarySetValue(
         theDict: CFMutableDictionaryRef,
@@ -344,6 +392,70 @@ extern "C" {
     ) -> CFDictionaryRef;
 
     pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    pub static mut kAXTrustedCheckOptionPrompt: CFStringRef;
+
+    pub fn AXUIElementCreateApplication(pid: pid_t) -> *const __AXUIElement;
+
+    pub fn AXObserverCreate(
+        application: pid_t,
+        callback: AXObserverCallback,
+        outObserver: *mut *mut __AXObserver,
+    ) -> AXError;
+
+    pub fn AXObserverAddNotification(
+        observer: *mut __AXObserver,
+        element: *const __AXUIElement,
+        notification: CFStringRef,
+        refcon: *mut ::std::os::raw::c_void,
+    ) -> AXError;
+
+    pub fn AXObserverGetRunLoopSource(observer: *mut __AXObserver) -> CFRunLoopSourceRef;
+
+    pub fn AXObserverRemoveNotification(
+        observer: *mut __AXObserver,
+        element: *const __AXUIElement,
+        notification: CFStringRef,
+    ) -> AXError;
+
+    pub fn AXUIElementSetAttributeValue(
+        element: *const __AXUIElement,
+        attribute: CFStringRef,
+        value: CFTypeRef,
+    ) -> AXError;
+
+    pub fn AXUIElementCopyAttributeValue(
+        element: *const __AXUIElement,
+        attribute: CFStringRef,
+        value: *mut CFTypeRef,
+    ) -> AXError;
+
+    pub fn AXObserverCreateWithInfoCallback(
+        application: pid_t,
+        callback: AXObserverCallbackWithInfo,
+        outObserver: *mut *mut __AXObserver,
+    ) -> AXError;
+
+    // PRIVATE API
+    // TODO: p sure the "identifier" is a pointer to a CGWindowId?
+    pub fn _AXUIElementGetWindow(element: *const __AXUIElement, identifier: *mut CGWindowID)
+        -> i32;
+
+    pub fn AXValueGetValue(
+        value: AXValueRef,
+        theType: AXValueType,
+        valuePtr: *mut ::std::os::raw::c_void,
+    ) -> Boolean;
+
+    pub fn AXUIElementPerformAction(element: *const __AXUIElement, action: CFStringRef) -> AXError;
+
+    pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
+
+    pub fn AXIsProcessTrusted() -> Boolean;
+
 }
 
 // TODO: verify correctness
@@ -391,7 +503,7 @@ pub fn cfstring_to_string(cfstring: CFStringRef) -> Option<String> {
             CFRelease(cfstring as *const _);
 
             Some(
-                CString::from_raw(buffer.as_mut_ptr())
+                CString::from_raw(buffer.leak().as_mut_ptr())
                     .to_string_lossy()
                     .into_owned(),
             )

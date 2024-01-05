@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{error::Error, fmt, time::Instant};
 
 use crate::sys;
 
@@ -10,7 +10,7 @@ mod window;
 pub type WindowId = u32;
 
 /// A posiiton with an x and y axis.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Position {
     /// The x position.
     pub x: f64,
@@ -19,7 +19,7 @@ pub struct Position {
 }
 
 /// A size with width and height.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Size {
     /// The width of the size.
     pub width: f64,
@@ -96,16 +96,16 @@ pub enum WindowEventKind {
 #[derive(Debug)]
 pub struct WindowEvent {
     kind: WindowEventKind,
-    window: sys::Window,
+    window: Window,
     timestamp: Instant,
 }
 
 impl WindowEvent {
-    /// Create a new [`WindowEvent`](WindowEvent) with the specified kind and window.
+    /// Create a new [`WindowEvent`](WindowEvent) with the specified event kind and window.
     pub fn new(kind: WindowEventKind, window: Window) -> WindowEvent {
         WindowEvent {
             kind,
-            window: window.0,
+            window,
             timestamp: Instant::now(),
         }
     }
@@ -118,18 +118,33 @@ impl WindowEvent {
     ) -> WindowEvent {
         WindowEvent {
             kind,
-            window: window.0,
+            window,
             timestamp,
         }
     }
+
+    /// Returns the kind of window event.
+    pub fn kind(&self) -> &WindowEventKind {
+        &self.kind
+    }
+
+    /// Returns a reference to the [Window](Window) that caused the event.
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+
+    /// Returns whethere this window event happened before the specified window event.
+    pub fn before(&self, other: WindowEvent) -> bool {
+        self.timestamp < other.timestamp
+    }
 }
 
-// TODO: add context
+// TODO: add context to errors
 /// An error caused by the underlying operating system.
 #[derive(Debug)]
 pub enum WindowError {
-    /// The API used to operate on windows is disabled.
-    ApiDisabled,
+    /// The program does not have sufficient permissions to access the underlying API.
+    NotTrusted,
     /// An invalid argument was passed internally.
     ///
     /// This type of error means there is a bug in this library!
@@ -147,4 +162,39 @@ pub enum WindowError {
     AlienUnsupported,
     /// There was a random internal failure in the operating system.
     ArbitraryFailure,
+}
+impl Error for WindowError {}
+
+impl fmt::Display for WindowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowError::NotTrusted => {
+                write!(
+                    f,
+                    "the program needs to request permission to the underlying API"
+                )
+            }
+            WindowError::InvalidInternalArgument => {
+                write!(
+                    f,
+                    "internal bug, input incorrect parameter, it's not you it's me!"
+                )
+            }
+            WindowError::AlreadyWatching => {
+                write!(f, "already watching this window")
+            }
+            WindowError::WasNeverWatching => {
+                write!(f, "cannot unwatch a window that was never watched")
+            }
+            WindowError::InvalidHandle => {
+                write!(f, "cannot perform operation on invalid handle")
+            }
+            WindowError::AlienUnsupported => {
+                write!(f, "the window does not support the windowing API")
+            }
+            WindowError::ArbitraryFailure => {
+                write!(f, "arbitrary failure returned by the operating system")
+            }
+        }
+    }
 }
