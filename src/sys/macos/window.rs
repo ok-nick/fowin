@@ -1,49 +1,36 @@
 use std::{
     mem::MaybeUninit,
-    ptr,
     sync::{Arc, RwLock, RwLockReadGuard},
-    time::Instant,
 };
 
 use icrate::Foundation::{CGPoint, CGSize};
 
 use crate::{
     protocol::{Position, Size, WindowError, WindowId},
-    sys::platform::{
-        application,
-        ffi::{
-            kCGWindowName, kCGWindowNumber, kCGWindowOwnerName, CFArrayGetCount,
-            CFDictionaryGetValue, CFNumberGetValue, CFNumberRef, CFStringGetLength, CGWindowID,
-            __AXUIElement,
-        },
-    },
+    sys::platform::{application, ffi::CFArrayGetCount},
 };
 
 use super::ffi::{
-    self, cfstring_from_str, cfstring_to_string, kAXErrorIllegalArgument, kAXErrorNoValue,
-    kAXErrorSuccess, kAXFullScreenAttribute, kAXMinimizedAttribute, kAXPositionAttribute,
-    kAXRaiseAction, kAXSizeAttribute, kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse,
-    kCFBooleanTrue, AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
+    cfstring_from_str, cfstring_to_string, kAXErrorSuccess, kAXFullScreenAttribute,
+    kAXMinimizedAttribute, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
+    kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse, kCFBooleanTrue,
+    AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
     AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
-    CFRelease, CFRetain, CFStringRef, CFTypeRef, _AXUIElementGetWindow, kAXValueTypeCGPoint,
-    kCFAllocatorDefault, CFArrayCreate, CFArrayGetValueAtIndex, CFArrayRef, CFDictionaryRef,
-    CGWindowListCopyWindowInfo, CGWindowListCreateDescriptionFromArray,
+    CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, kAXValueTypeCGPoint,
+    CFArrayGetValueAtIndex,
 };
 
-// NOTE: this is safe to pass between threads (although perhaps not safe to query between threads?)
-//       TLDR; it's a pointer for another process (or an ID depending on the backend framework)
-//       https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00042.html
-// NOTE: according to the URL below, it may be safe to use on different threads as long as it's only
-//       being used by one thread at a time
-//       https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Multithreading/ThreadSafetySummary/ThreadSafetySummary.html
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Window {
+    // NOTE:
+    // * The ref is a pointer in another process (Carbon) or identifiers (Cocoa): https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00042.html
+    // * Safe to use between threads, but will block anyways: https://lists.apple.com/archives/accessibility-dev/2012/Dec/msg00025.html
     // Wrapped in an RwLock so that we can easily revalidate the inner ref, if need be.
-    inner: RwLock<AXUIElementRef>,
+    inner: Arc<RwLock<AXUIElementRef>>,
     // TODO: now begs the question, can an AXUIElementRef for an application spontaneously change? Do we
     // need to validate this as well? If that's the case, then only store the application PID and we can
     // recreate the AXUIElementRef.
-    app_inner: AXUIElementRef,
+    app_handle: AXUIElementRef,
     id: WindowId,
 }
 
@@ -52,12 +39,12 @@ pub struct Window {
 impl Window {
     pub(super) fn new(
         inner: AXUIElementRef,
-        app_inner: AXUIElementRef,
+        app_handle: AXUIElementRef,
     ) -> Result<Window, WindowError> {
         Ok(Window {
             id: _id(&inner)?,
-            inner: RwLock::new(inner),
-            app_inner,
+            inner: Arc::new(RwLock::new(inner)),
+            app_handle,
         })
     }
 
@@ -72,15 +59,18 @@ impl Window {
     // handle corresponding to the cached id.
     // source: https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00045.html
     pub fn exists(&self) -> Result<bool, WindowError> {
-        match self.inner.read() {
-            // if the handle is outdated, try revalidating, otherwise it's good
-            Ok(inner) => match self.id == _id(&inner)? {
-                true => Ok(true),
-                false => self.try_revalidate(),
-            },
-            // the lock is poisoned, fix it
-            Err(_) => self.try_revalidate(),
+        // scope the guard so that the read lock drops before we attempt acquire a write lock in try_revalidate
+        {
+            let guard = self.inner.read();
+            if let Ok(inner) = guard {
+                if self.id == _id(&inner)? {
+                    return Ok(true);
+                }
+            }
         }
+
+        // the lock is poisoned or the handle has been recycled, fix it
+        self.try_revalidate()
     }
 
     pub fn title(&self) -> Result<String, WindowError> {
@@ -120,7 +110,7 @@ impl Window {
             let result = unsafe {
                 let value = size.assume_init();
                 let result = AXValueGetValue(
-                    value as AXValueRef, // TODO: sure this works?
+                    value as AXValueRef,
                     kAXValueTypeCGSize,
                     frame.as_mut_ptr() as *mut _,
                 );
@@ -342,6 +332,7 @@ impl Window {
 
     fn read_inner(&self) -> Result<RwLockReadGuard<AXUIElementRef>, WindowError> {
         if self.exists()? {
+            // exists() is called on the same thread, so if the thread was poisoned, it would never reach here anyways, therefore the unwrap is safe
             Ok(self.inner.read().unwrap())
         } else {
             Err(WindowError::InvalidHandle)
@@ -351,12 +342,13 @@ impl Window {
     // Attempt to revalidate the underlying window handle, if it still exists. If a handle was found,
     // return true, otherwise false.
     fn try_revalidate(&self) -> Result<bool, WindowError> {
-        let raw_windows = application::raw_windows(&self.app_inner)?;
+        let raw_windows = application::raw_windows(&self.app_handle)?;
         let len = unsafe { CFArrayGetCount(raw_windows) };
         for i in 0..len {
             let window =
                 AXUIElementRef(unsafe { CFArrayGetValueAtIndex(raw_windows, i) as *const _ });
 
+            // TODO: I can also use CFEqual on the AXUIElementRef pointers iirc, read more @ ffi::AXUIElementRef
             if _id(&window)? == self.id {
                 let poisioned = self.inner.is_poisoned();
 

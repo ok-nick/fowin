@@ -1,7 +1,5 @@
 use std::{error::Error, fmt, time::Instant};
 
-use crate::sys;
-
 pub use self::window::Window;
 
 mod window;
@@ -140,26 +138,28 @@ impl WindowEvent {
 }
 
 // TODO: add context to errors
-/// An error caused by the underlying operating system.
+/// An error caused by the operating system.
 #[derive(Debug)]
 pub enum WindowError {
-    /// The program does not have sufficient permissions to access the underlying API.
+    /// The program does not have sufficient permissions to access the underlying API. Call [request_trust](crate::request_trust) to request the necessary permission.
     NotTrusted,
     /// An invalid argument was passed internally.
     ///
     /// This type of error means there is a bug in this library!
     InvalidInternalArgument,
-    // TODO: change to InvalidInternalArgument instead?
+
     /// The window is already being watched for this event.
     ///
     /// This type of error should never be possible.
-    AlreadyWatching,
+    // AlreadyWatching,
+
     /// Cannot unwatch if it was never watched in the first place.
-    WasNeverWatching,
+    // WasNeverWatching,
+
     /// The handle to the window is invalid. This could mean it no longer exists.
     InvalidHandle,
     /// The specified window does not support this type of operation.
-    AlienUnsupported,
+    Unsupported,
     /// There was a random internal failure in the operating system.
     ArbitraryFailure,
 }
@@ -180,16 +180,16 @@ impl fmt::Display for WindowError {
                     "internal bug, input incorrect parameter, it's not you it's me!"
                 )
             }
-            WindowError::AlreadyWatching => {
-                write!(f, "already watching this window")
-            }
-            WindowError::WasNeverWatching => {
-                write!(f, "cannot unwatch a window that was never watched")
-            }
+            // WindowError::AlreadyWatching => {
+            //     write!(f, "already watching this window")
+            // }
+            // WindowError::WasNeverWatching => {
+            //     write!(f, "cannot unwatch a window that was never watched")
+            // }
             WindowError::InvalidHandle => {
                 write!(f, "cannot perform operation on invalid handle")
             }
-            WindowError::AlienUnsupported => {
+            WindowError::Unsupported => {
                 write!(f, "the window does not support the windowing API")
             }
             WindowError::ArbitraryFailure => {

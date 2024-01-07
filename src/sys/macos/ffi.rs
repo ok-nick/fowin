@@ -86,31 +86,49 @@ pub const kAXValueTypeCGSize: _bindgen_ty_1575 = 2;
 pub const kAXValueTypeCGPoint: _bindgen_ty_1575 = 1;
 pub type CFArrayRef = *const __CFArray;
 
+// TODO: AXUIElementRefs can be compared for equality using CFEqual, impl Eq for Window as well
+//       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
+//       https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L305
 #[repr(C)]
 #[derive(Debug)]
 pub struct AXUIElementRef(pub *const __AXUIElement);
+impl AXUIElementRef {
+    pub fn increment_ref_count(&self) {
+        unsafe {
+            CFRetain(self.0 as *const _);
+        }
+    }
+}
 unsafe impl Sync for AXUIElementRef {}
 unsafe impl Send for AXUIElementRef {}
 impl Clone for AXUIElementRef {
     fn clone(&self) -> Self {
-        unsafe { AXUIElementRef(CFRetain(self.0 as *const _) as *const __AXUIElement) }
+        self.increment_ref_count();
+        AXUIElementRef(self.0)
     }
 }
 impl Drop for AXUIElementRef {
     fn drop(&mut self) {
         unsafe {
-            // CFRelease(self.0 as *const _);
+            CFRelease(self.0 as *const _);
         }
     }
 }
 
-// TODO: ^ same here?
 #[repr(C)]
 #[derive(Debug)]
 pub struct AXObserverRef(pub *mut __AXObserver);
+impl AXObserverRef {
+    pub fn increment_ref_count(&self) {
+        unsafe {
+            CFRetain(self.0 as *const _);
+        }
+    }
+}
 impl Clone for AXObserverRef {
     fn clone(&self) -> Self {
-        unsafe { AXObserverRef(CFRetain(self.0 as *mut _) as *mut __AXObserver) }
+        self.increment_ref_count();
+        AXObserverRef(self.0)
     }
 }
 impl Drop for AXObserverRef {
@@ -440,7 +458,6 @@ extern "C" {
     ) -> AXError;
 
     // PRIVATE API
-    // TODO: p sure the "identifier" is a pointer to a CGWindowId?
     pub fn _AXUIElementGetWindow(element: *const __AXUIElement, identifier: *mut CGWindowID)
         -> i32;
 
@@ -458,7 +475,6 @@ extern "C" {
 
 }
 
-// TODO: verify correctness
 pub unsafe fn NSRunningApplication_processIdentifier(
     app: &icrate::AppKit::NSRunningApplication,
 ) -> pid_t {

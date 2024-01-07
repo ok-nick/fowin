@@ -20,13 +20,12 @@ impl Watcher {
         self.0.iter_windows().map(|result| result.map(Window))
     }
 
-    // TODO: don't expose crossbeam types to public API
     /// Returns the next window event.
     ///
     /// Note, these events are not guaranteed to be precisely ordered. However, they do provide
     /// a timestamp that can be used for ordering. Consider buffering events if order is important.
     #[inline]
-    pub fn next_request(&self) -> Result<WindowEvent, crossbeam_channel::RecvError> {
+    pub fn next_request(&self) -> WindowEvent {
         self.0.next_request()
     }
 }
