@@ -1,6 +1,6 @@
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::state::{Property, PropertyKey};
+use crate::state::Property;
 
 #[derive(Debug)]
 pub enum Scope {
@@ -44,19 +44,19 @@ impl Operation {
         }
     }
 
-    pub fn gen_random_property<R: Rng>(&self, rng: &mut R) -> Property {
-        match self {
-            Operation::Resize => Property::random(rng, PropertyKey::Size),
-            Operation::Move => Property::random(rng, PropertyKey::Position),
-            Operation::Fullscreen => Property::Fullscreened(true),
-            Operation::Unfullscreen => Property::Fullscreened(false),
-            Operation::Show => Property::Hidden(false),
-            Operation::Hide => Property::Hidden(true),
-            Operation::BringToFront => Property::AtFront(true),
-            Operation::Focus => Property::Focused(true),
-            Operation::Rename => Property::random(rng, PropertyKey::Title),
-        }
-    }
+    // pub fn gen_random_property<R: Rng>(&self, rng: &mut R) -> Property {
+    //     match self {
+    //         Operation::Resize => Property::random(rng, PropertyKey::Size),
+    //         Operation::Move => Property::random(rng, PropertyKey::Position),
+    //         Operation::Fullscreen => Property::Fullscreened(true),
+    //         Operation::Unfullscreen => Property::Fullscreened(false),
+    //         Operation::Show => Property::Hidden(false),
+    //         Operation::Hide => Property::Hidden(true),
+    //         Operation::BringToFront => Property::AtFront(true),
+    //         Operation::Focus => Property::Focused(true),
+    //         Operation::Rename => Property::random(rng, PropertyKey::Title),
+    //     }
+    // }
 
     pub const fn scope(&self) -> Scope {
         match self {

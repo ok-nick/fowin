@@ -1,8 +1,8 @@
 # `fowin-test`
-A test suite for `fowin` that uses [random testing](https://en.wikipedia.org/wiki/Random_testing) to ensure reliability and consistency among its backends.
+A test suite for `fowin` that uses [random testing](https://en.wikipedia.org/wiki/Random_testing) to ensure stability among its backends.
 
 ## Rationale
-The reliability of `fowin` is influenced by the operating system APIs it utilizes, which are not known for their dependability. Within these APIs lie numerous concealed bugs and intricacies capable of causing spontaneous behavior in the library. Consequently, it becomes important to rigorously assess the backends for their reliability and consistency. This testing approach enables the development of effective workarounds for platform-specific bugs, ensuring uniform and equivalent operation across various platforms. A notable advantage of this testing suite lies in its ability to evaluate all backend APIs by focusing on testing a singular high-level API.
+The stabiltiy of `fowin` is influenced by the operating system APIs it utilizes, which are not known for their dependability. Within these APIs lie numerous concealed bugs and intricacies capable of causing spontaneous behavior in the library. Consequently, it becomes important to rigorously assess the backends for their reliability and consistency. This testing approach enables the development of effective workarounds for platform-specific bugs, ensuring uniform and equivalent operation across various platforms. A notable advantage of this testing suite lies in its ability to evaluate all backend APIs by focusing on testing a singular high-level API.
 
 ## Control Flow
 1. A random seed is generated

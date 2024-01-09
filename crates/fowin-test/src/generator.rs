@@ -1,64 +1,44 @@
-use rand::Rng;
+use rand::{seq::SliceRandom, Rng};
 
-use crate::{operation::Operation, state::State};
+use crate::state::{PropertyKind, State};
 
-// static ID: AtomicU32 = AtomicU32::new(0);
-// id: ID.fetch_add(1, Ordering::SeqCst),
-
-#[derive(Debug)]
-pub struct Step {
-    pub operation: Operation,
-    pub expected_state: State,
+pub fn overlap_timelines<R: Rng>(rng: &mut R) {
+    // TODO: takes two timelines and overlaps them
 }
 
-pub fn gen_operations<R: Rng>(num: usize, rng: &mut R) -> Vec<Step> {
-    //     // First things first, we need to create a window to get the ball rolling.
-    //     let mut operations = vec![Step {
-    //         operation: Operation::Create,
-    //         expected_state: State::random_but_exists(rng),
-    //     }];
+pub fn gen_timeline<R: Rng>(num: usize, rng: &mut R) -> Vec<State> {
+    let mut timeline = Vec::with_capacity(num);
 
-    //     let mut available = Vec::new();
-    //     for i in 1..num {
-    //         // Previous element will always exist since we start at index 1.
-    //         let state = &operations.get(i - 1).unwrap().expected_state;
+    let mut available = Vec::with_capacity(PropertyKind::ALL.len());
+    let mut state = State::random(rng);
+    for _ in 0..num {
+        for kind in PropertyKind::ALL {
+            let not_satisfied = kind
+                .constraints()
+                .iter()
+                .any(|constraint| state.get(constraint.kind()) != constraint);
+            if !not_satisfied {
+                available.push(kind);
+            }
 
-    //         for constraint in Constraint::ALL {
-    //             let mut satisfied = true;
-    //             for property in constraint.properties {
-    //                 if property == &state.get(property.key()) {
-    //                     // If the constraint isn't satisfied, skip this operation.
-    //                     satisfied = false;
-    //                     break;
-    //                 }
-    //             }
+            // Choose a random operation from the list of available operations after constraints are satisfied.
+            // One potential issue is generating a false value for a property that is already false. It may seem
+            // redundant, but it is beneficial to test for cases like this, as the expected outcome should be the same.
+            match available.choose(rng) {
+                Some(&kind) => {
+                    state.set(kind.random(rng));
+                    timeline.push(state.clone());
 
-    //             if satisfied {
-    //                 available.push(constraint.operation);
-    //             }
-    //         }
+                    // Clear the vector so it can be reused.
+                    available.clear();
+                }
+                // Constraints will never be strict to the point where there is no possible operation to generate.
+                None => unreachable!(),
+            }
+        }
+    }
 
-    //         match available.choose(rng) {
-    //             Some(&operation) => {
-    //                 let mut state = state.clone();
-
-    //                 state.set(operation.gen_random_property(rng));
-
-    //                 operations.push(Step {
-    //                     operation,
-    //                     expected_state: state,
-    //                 });
-
-    //                 // Clear the vector so it can be reused.
-    //                 available.clear();
-    //             }
-    //             // Constraints will never be strict to the point where there is no possible operation to generate.
-    //             None => unreachable!(),
-    //         }
-    //     }
-
-    //     operations
-    todo!()
+    timeline
 }
 
 // TODO: impl imperative first

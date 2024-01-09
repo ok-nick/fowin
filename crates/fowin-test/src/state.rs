@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use fowin::{Position, Size};
-use rand::Rng;
+use rand::{distributions::Standard, prelude::Distribution, Rng};
 
 // TODO: can impl this without a hashmap
 #[derive(Debug, Clone)]
 pub struct State {
-    properties: HashMap<PropertyKey, Property>,
+    properties: HashMap<PropertyKind, Property>,
 }
 
 impl State {
@@ -15,16 +15,20 @@ impl State {
     }
 
     pub fn set(&mut self, property: Property) -> Property {
-        self.properties.insert(property.key(), property).unwrap()
+        self.properties.insert(property.kind(), property).unwrap()
     }
 
-    pub fn get(&self, key: PropertyKey) -> &Property {
-        self.properties.get(&key).unwrap()
+    pub fn get(&self, kind: PropertyKind) -> &Property {
+        self.properties.get(&kind).unwrap()
+    }
+
+    pub fn diff(&self, other: &State) -> Vec<Property> {
+        todo!()
     }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum PropertyKey {
+pub enum PropertyKind {
     Title,
     Size,
     Position,
@@ -32,6 +36,43 @@ pub enum PropertyKey {
     Hidden,
     AtFront,
     Focused,
+}
+
+impl PropertyKind {
+    pub const ALL: [PropertyKind; 7] = [
+        PropertyKind::Title,
+        PropertyKind::Size,
+        PropertyKind::Position,
+        PropertyKind::Fullscreened,
+        PropertyKind::Hidden,
+        PropertyKind::AtFront,
+        PropertyKind::Focused,
+    ];
+
+    pub fn constraints(&self) -> &'static [Property] {
+        &[]
+    }
+
+    pub fn random<R: Rng>(&self, rng: &mut R) -> Property {
+        match self {
+            PropertyKind::Title => todo!(),
+            PropertyKind::Size => todo!(),
+            PropertyKind::Position => todo!(),
+            PropertyKind::Fullscreened => todo!(),
+            PropertyKind::Hidden => todo!(),
+            PropertyKind::AtFront => todo!(),
+            PropertyKind::Focused => todo!(),
+        }
+    }
+}
+
+impl Distribution<PropertyKind> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PropertyKind {
+        match rng.gen_range(0..8) {
+            0 => PropertyKind::Title,
+            _ => PropertyKind::Focused,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,27 +87,15 @@ pub enum Property {
 }
 
 impl Property {
-    pub fn random<R: Rng>(rng: &mut R, key: PropertyKey) -> Property {
-        match key {
-            PropertyKey::Title => todo!(),
-            PropertyKey::Size => todo!(),
-            PropertyKey::Position => todo!(),
-            PropertyKey::Fullscreened => todo!(),
-            PropertyKey::Hidden => todo!(),
-            PropertyKey::AtFront => todo!(),
-            PropertyKey::Focused => todo!(),
-        }
-    }
-
-    pub fn key(&self) -> PropertyKey {
+    pub fn kind(&self) -> PropertyKind {
         match self {
-            Property::Title(_) => PropertyKey::Title,
-            Property::Size(_) => PropertyKey::Size,
-            Property::Position(_) => PropertyKey::Position,
-            Property::Fullscreened(_) => PropertyKey::Fullscreened,
-            Property::Hidden(_) => PropertyKey::Hidden,
-            Property::AtFront(_) => PropertyKey::AtFront,
-            Property::Focused(_) => PropertyKey::Focused,
+            Property::Title(_) => PropertyKind::Title,
+            Property::Size(_) => PropertyKind::Size,
+            Property::Position(_) => PropertyKind::Position,
+            Property::Fullscreened(_) => PropertyKind::Fullscreened,
+            Property::Hidden(_) => PropertyKind::Hidden,
+            Property::AtFront(_) => PropertyKind::AtFront,
+            Property::Focused(_) => PropertyKind::Focused,
         }
     }
 }
