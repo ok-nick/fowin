@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+fowin = { path = "../../" }
 winit = "0.29.8"
+rand = "0.8.5"

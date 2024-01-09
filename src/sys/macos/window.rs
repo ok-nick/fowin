@@ -59,7 +59,7 @@ impl Window {
     // handle corresponding to the cached id.
     // source: https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00045.html
     pub fn exists(&self) -> Result<bool, WindowError> {
-        // scope the guard so that the read lock drops before we attempt acquire a write lock in try_revalidate
+        // Scope the guard so that the read lock drops before we attempt acquire a write lock in try_revalidate.
         {
             let guard = self.inner.read();
             if let Ok(inner) = guard {
@@ -69,7 +69,7 @@ impl Window {
             }
         }
 
-        // the lock is poisoned or the handle has been recycled, fix it
+        // If the lock is poisoned or the handle has been recycled, fix it.
         self.try_revalidate()
     }
 
@@ -147,7 +147,7 @@ impl Window {
             let result = unsafe {
                 let value = position.assume_init();
                 AXValueGetValue(
-                    value as AXValueRef, // TODO: sure this works?
+                    value as AXValueRef,
                     kAXValueTypeCGPoint,
                     frame.as_mut_ptr() as *mut _,
                 );
@@ -342,6 +342,15 @@ impl Window {
     // Attempt to revalidate the underlying window handle, if it still exists. If a handle was found,
     // return true, otherwise false.
     fn try_revalidate(&self) -> Result<bool, WindowError> {
+        let inner = self.inner.write();
+        // If the lock isn't poisoned, then check if it's valid.
+        if let Ok(inner) = &inner {
+            // If the handle was validated while we were waiting to obtain the lock, then no work needs to be done, it's valid.
+            if self.id == _id(inner)? {
+                return Ok(true);
+            }
+        }
+
         let raw_windows = application::raw_windows(&self.app_handle)?;
         let len = unsafe { CFArrayGetCount(raw_windows) };
         for i in 0..len {
@@ -350,17 +359,16 @@ impl Window {
 
             // TODO: I can also use CFEqual on the AXUIElementRef pointers iirc, read more @ ffi::AXUIElementRef
             if _id(&window)? == self.id {
-                let poisioned = self.inner.is_poisoned();
-
-                let mut inner = self.inner.write().unwrap_or_else(|mut inner| {
-                    **inner.get_mut() = window.clone();
-                    self.inner.clear_poison();
-                    inner.into_inner()
-                });
-
-                if !poisioned {
-                    *inner = window.clone();
+                match inner {
+                    Ok(mut inner) => {
+                        *inner = window.clone();
+                    }
+                    Err(mut err) => {
+                        **err.get_mut() = window.clone();
+                        self.inner.clear_poison();
+                    }
                 }
+
                 return Ok(true);
             }
         }
@@ -377,7 +385,7 @@ fn _id(inner: &AXUIElementRef) -> Result<WindowId, WindowError> {
     if result == kAXErrorSuccess {
         Ok(unsafe { id.assume_init() })
     } else {
-        // As this is a private API, there is no formal specification for what errors may be returned,
+        // As this is a private API, there is no formal specification for which errors may be returned,
         // but we can take a good guess.
         Err(WindowError::from_ax_error(result))
     }

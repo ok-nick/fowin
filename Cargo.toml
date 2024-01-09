@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
-# TODO: setup workspace
+[workspace]
+members = [".", "crates/fowin-test"]
 
 [dependencies]
 crossbeam-channel = "0.5.10"

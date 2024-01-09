@@ -1,0 +1,90 @@
+use rand::{distributions::Standard, prelude::Distribution, Rng};
+
+use crate::state::{Property, PropertyKey};
+
+#[derive(Debug)]
+pub enum Scope {
+    Local,
+    Foreign,
+    Global,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Operation {
+    Resize,
+    Move,
+    Fullscreen,
+    Unfullscreen,
+    Show,
+    Hide,
+    BringToFront,
+    // TODO: this property also needs to somehow unfocus the last window
+    Focus,
+    Rename,
+}
+
+impl Operation {
+    pub const ALL: [Operation; 9] = [
+        Operation::Resize,
+        Operation::Move,
+        Operation::Fullscreen,
+        Operation::Unfullscreen,
+        Operation::Show,
+        Operation::Hide,
+        Operation::BringToFront,
+        Operation::Focus,
+        Operation::Rename,
+    ];
+
+    fn constraint(&self) -> &'static [Property] {
+        match self {
+            Operation::Resize => &[Property::Fullscreened(false), Property::Hidden(false)],
+            Operation::Move => &[Property::Fullscreened(false), Property::Hidden(false)],
+            _ => &[],
+        }
+    }
+
+    pub fn gen_random_property<R: Rng>(&self, rng: &mut R) -> Property {
+        match self {
+            Operation::Resize => Property::random(rng, PropertyKey::Size),
+            Operation::Move => Property::random(rng, PropertyKey::Position),
+            Operation::Fullscreen => Property::Fullscreened(true),
+            Operation::Unfullscreen => Property::Fullscreened(false),
+            Operation::Show => Property::Hidden(false),
+            Operation::Hide => Property::Hidden(true),
+            Operation::BringToFront => Property::AtFront(true),
+            Operation::Focus => Property::Focused(true),
+            Operation::Rename => Property::random(rng, PropertyKey::Title),
+        }
+    }
+
+    pub const fn scope(&self) -> Scope {
+        match self {
+            Operation::Resize => Scope::Global,
+            Operation::Move => Scope::Global,
+            Operation::Fullscreen => Scope::Global,
+            Operation::Unfullscreen => Scope::Global,
+            Operation::Show => Scope::Global,
+            Operation::Hide => Scope::Global,
+            Operation::BringToFront => Scope::Global,
+            Operation::Focus => Scope::Global,
+            Operation::Rename => Scope::Local,
+        }
+    }
+}
+
+impl Distribution<Operation> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Operation {
+        match rng.gen_range(0..8) {
+            0 => Operation::Resize,
+            1 => Operation::Move,
+            2 => Operation::Fullscreen,
+            3 => Operation::Unfullscreen,
+            4 => Operation::Show,
+            5 => Operation::Hide,
+            6 => Operation::BringToFront,
+            7 => Operation::Focus,
+            _ => Operation::Rename,
+        }
+    }
+}
