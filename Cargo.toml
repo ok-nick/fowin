@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace]
-members = [".", "crates/fowin-test"]
+members = [".", "crates/*"]
 
 [dependencies]
 crossbeam-channel = "0.5.10"

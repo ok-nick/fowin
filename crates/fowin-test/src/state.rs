@@ -1,101 +1,53 @@
 use std::collections::HashMap;
 
-use fowin::{Position, Size};
 use rand::{distributions::Standard, prelude::Distribution, Rng};
+use serde::{Deserialize, Serialize};
+
+// TODO: temp for serde impls
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Size {
+    pub width: f64,
+    pub height: f64,
+}
 
 // TODO: can impl this without a hashmap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
-    properties: HashMap<PropertyKind, Property>,
+    pub title: String,
+    pub size: Size,
+    pub position: Position,
+    pub fullscreen: bool,
+    pub hidden: bool,
+    pub at_front: bool,
+    pub focused: bool,
 }
 
 impl State {
-    pub fn random<R: Rng>(rng: &mut R) -> State {
-        todo!()
-    }
-
-    pub fn set(&mut self, property: Property) -> Property {
-        self.properties.insert(property.kind(), property).unwrap()
-    }
-
-    pub fn get(&self, kind: PropertyKind) -> &Property {
-        self.properties.get(&kind).unwrap()
-    }
-
-    pub fn diff(&self, other: &State) -> Vec<Property> {
-        todo!()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum PropertyKind {
-    Title,
-    Size,
-    Position,
-    Fullscreened,
-    Hidden,
-    AtFront,
-    Focused,
-}
-
-impl PropertyKind {
-    pub const ALL: [PropertyKind; 7] = [
-        PropertyKind::Title,
-        PropertyKind::Size,
-        PropertyKind::Position,
-        PropertyKind::Fullscreened,
-        PropertyKind::Hidden,
-        PropertyKind::AtFront,
-        PropertyKind::Focused,
-    ];
-
-    pub fn constraints(&self) -> &'static [Property] {
-        &[]
-    }
-
-    pub fn random<R: Rng>(&self, rng: &mut R) -> Property {
-        match self {
-            PropertyKind::Title => todo!(),
-            PropertyKind::Size => todo!(),
-            PropertyKind::Position => todo!(),
-            PropertyKind::Fullscreened => todo!(),
-            PropertyKind::Hidden => todo!(),
-            PropertyKind::AtFront => todo!(),
-            PropertyKind::Focused => todo!(),
+    pub fn new() -> State {
+        State {
+            title: String::new(),
+            size: Size {
+                width: 0.0,
+                height: 0.0,
+            },
+            position: Position { x: 0.0, y: 0.0 },
+            fullscreen: false,
+            hidden: false,
+            // TODO: these properties may vary, include them in state?
+            at_front: false,
+            focused: false,
         }
     }
 }
 
-impl Distribution<PropertyKind> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PropertyKind {
-        match rng.gen_range(0..8) {
-            0 => PropertyKind::Title,
-            _ => PropertyKind::Focused,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Property {
-    Title(String),
-    Size(Size),
-    Position(Position),
-    Fullscreened(bool),
-    Hidden(bool),
-    AtFront(bool),
-    Focused(bool),
-}
-
-impl Property {
-    pub fn kind(&self) -> PropertyKind {
-        match self {
-            Property::Title(_) => PropertyKind::Title,
-            Property::Size(_) => PropertyKind::Size,
-            Property::Position(_) => PropertyKind::Position,
-            Property::Fullscreened(_) => PropertyKind::Fullscreened,
-            Property::Hidden(_) => PropertyKind::Hidden,
-            Property::AtFront(_) => PropertyKind::AtFront,
-            Property::Focused(_) => PropertyKind::Focused,
-        }
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
     }
 }

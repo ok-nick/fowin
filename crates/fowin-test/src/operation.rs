@@ -1,6 +1,6 @@
 use rand::{distributions::Standard, prelude::Distribution, Rng};
 
-use crate::state::Property;
+use crate::state::State;
 
 #[derive(Debug)]
 pub enum Scope {
@@ -36,27 +36,45 @@ impl Operation {
         Operation::Rename,
     ];
 
-    fn constraint(&self) -> &'static [Property] {
+    pub fn satisfied(&self, state: &State) -> bool {
         match self {
-            Operation::Resize => &[Property::Fullscreened(false), Property::Hidden(false)],
-            Operation::Move => &[Property::Fullscreened(false), Property::Hidden(false)],
-            _ => &[],
+            Operation::Resize => state.fullscreen && !state.hidden,
+            Operation::Move => state.fullscreen && !state.hidden,
+            _ => true,
         }
     }
 
-    // pub fn gen_random_property<R: Rng>(&self, rng: &mut R) -> Property {
-    //     match self {
-    //         Operation::Resize => Property::random(rng, PropertyKey::Size),
-    //         Operation::Move => Property::random(rng, PropertyKey::Position),
-    //         Operation::Fullscreen => Property::Fullscreened(true),
-    //         Operation::Unfullscreen => Property::Fullscreened(false),
-    //         Operation::Show => Property::Hidden(false),
-    //         Operation::Hide => Property::Hidden(true),
-    //         Operation::BringToFront => Property::AtFront(true),
-    //         Operation::Focus => Property::Focused(true),
-    //         Operation::Rename => Property::random(rng, PropertyKey::Title),
-    //     }
-    // }
+    pub fn apply<R: Rng>(&self, state: &mut State, rng: &mut R) {
+        match self {
+            Operation::Resize => {
+                state.size = todo!(); // randomize
+            }
+            Operation::Move => {
+                state.position = todo!() // randomize
+            }
+            Operation::Fullscreen => {
+                state.fullscreen = true;
+            }
+            Operation::Unfullscreen => {
+                state.fullscreen = false;
+            }
+            Operation::Show => {
+                state.hidden = false;
+            }
+            Operation::Hide => {
+                state.hidden = true;
+            }
+            Operation::BringToFront => {
+                state.at_front = true;
+            }
+            Operation::Focus => {
+                state.focused = true;
+            }
+            Operation::Rename => {
+                state.title = todo!(); //randomize
+            }
+        }
+    }
 
     pub const fn scope(&self) -> Scope {
         match self {

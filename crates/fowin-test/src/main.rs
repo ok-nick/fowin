@@ -1,55 +1,107 @@
+use std::{io::Write, process::Child};
+
+use generator::{overlap_timelines, ExecScope, Step};
+use operation::{Operation, Scope};
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use state::State;
 
 // mod constraint;
 mod generator;
 mod operation;
 mod state;
 
-// static ID: AtomicU32 = AtomicU32::new(0);
-// id: ID.fetch_add(1, Ordering::SeqCst),
+#[derive(Debug)]
+pub struct Group {
+    pub timeline: Vec<Step>,
+    pub num_windows: u32,
+}
 
 fn main() {
-    // TODO: temp for testing
+    // TODO: temp for testing, use const_random crate
     let mut rng = StdRng::seed_from_u64(1);
 
-    // TODO:
-    // * gen timeline for each (random) # of windows
-    // * group timelines randomly
-    // * overlap timelines within groups
-    // * overlap group timelines
-    // * execute sequentially
+    let num_groups = rng.gen_range(1..10);
+    let mut groups = Vec::with_capacity(num_groups);
 
-    let num_windows = rng.gen_range(1..10);
-    let num_processes = rng.gen_range(1..num_windows);
-    for _ in 0..num_windows {
-        let num_steps = rng.gen_range(1..30);
-        let timeline = generator::gen_timeline(num_steps, &mut rng);
-        // TODO:
-        // * create window with initial state (timeline[0])
-        // * find diff between current state and prev state
-        // * perform operation based on diff
-        // * destroy window
-        for window in timeline.windows(2) {
-            let diff = window[0].diff(&window[1]);
-            //
+    for _ in 0..num_groups {
+        let num_windows = rng.gen_range(1..10);
+        let timelines = (0..num_windows)
+            .map(|_| {
+                let num_steps = rng.gen_range(1..30);
+                generator::gen_timeline(num_steps, &mut rng)
+            })
+            .collect::<Vec<Vec<Operation>>>();
+
+        let timeline = overlap_timelines(&timelines, &mut rng);
+        groups.push(Group {
+            timeline,
+            num_windows,
+        });
+    }
+
+    // TODO: spawn processes, cache them, create windows w/ state, then execute (overlapped group) timeline,
+    // to preserve window local ids, ensure steps are labeled with their group ids
+    for group in groups {
+        let mut process = Process::new().unwrap(); // TODO: handle unwrap
+
+        let mut states = Vec::with_capacity(group.num_windows as usize);
+        for step in group.timeline {
+            match states.get_mut(step.id as usize) {
+                Some(state) => {
+                    step.operation.apply(state, &mut rng);
+                    match step.scope {
+                        // Use fowin... kinda contradictory huh?
+                        ExecScope::Local => {
+                            todo!()
+                        }
+                        ExecScope::Foreign => {
+                            process.execute(state).unwrap();
+                        }
+                    }
+
+                    // TODO: verify props using fowin here
+                }
+                None => {
+                    // TODO: ensure index exists
+                    states[step.id as usize] = State::new();
+                    // TODO: apply state to window
+                }
+            }
         }
+
+        // TODO: destroy window
     }
 }
 
-// TODO: manages detached winit processes
+// TODO: Spawn process of other binary crate dedicated to handling winit ops
+// This crate will send commands over stdin, where the other crate will listen through stdin
+// The other crate will report any errors that occur and a finished state
+// This crate will wait for that response, if not (or a timeout hits), it will immediately error
+// This struct is used for managing these foreign processes
 #[derive(Debug)]
-pub struct ProcessManager {}
+pub struct Process {
+    inner: Child,
+}
 
-// NOTE: Here's how it will work.
-// * A randomized amount of windows will be created.
-// * Windows will be grouped randomly into a random amount of groups (denoting a new process).
-// * For each window, the generator will generate a random amount of operations.
-// * The final step takes each array of operations and randomly overlaps them to simulate a live system.
-//
-// That's the data. Now all we have to do is execute it in order.
-//
-// Generating Operations:
-// * It is possible to completely elimintate the idea of operations and instead rely on randomizing random properties. However,
-// that would disallow our constraint model.
-// * Constraints should be merged with operations, it makes sense.
-// *
+impl Process {
+    pub fn new() -> Result<Process, ()> {
+        Ok(Process { inner: todo!() })
+    }
+
+    // TODO:
+    // * pass the entire state?
+    // * pass the modified property?
+    pub fn execute(&mut self, state: &State) -> Result<(), ()> {
+        // TODO: this unwrap should be safe?
+        let mut stdin = self.inner.stdin.as_mut().unwrap();
+        // TODO: use rkyv instead of serde_json
+        stdin
+            .write_all(&serde_json::to_string(state).unwrap().into_bytes())
+            .unwrap();
+
+        // TODO: wait for error/ok response from process stdout
+        let stdout = self.inner.stdout.as_mut().unwrap();
+
+        Ok(())
+    }
+}
