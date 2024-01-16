@@ -18,7 +18,7 @@
     devShells.${system}.default = pkgs.mkShell {
       nativeBuildInputs = with pkgs;
         [
-          # TODO
+          libiconv # TODO: why is this required to compile fowin-test?
         ]
         ++ (with darwin.apple_sdk.frameworks; [
           CoreFoundation

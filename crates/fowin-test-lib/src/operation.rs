@@ -1,6 +1,10 @@
-use rand::{distributions::Standard, prelude::Distribution, Rng};
+use rand::{
+    distributions::{Alphanumeric, Standard},
+    prelude::Distribution,
+    Rng,
+};
 
-use crate::state::State;
+use crate::state::{Mutation, State};
 
 #[derive(Debug)]
 pub enum Scope {
@@ -44,35 +48,20 @@ impl Operation {
         }
     }
 
-    pub fn apply<R: Rng>(&self, state: &mut State, rng: &mut R) {
+    pub fn mutation<R: Rng>(&self, rng: &mut R) -> Mutation {
         match self {
-            Operation::Resize => {
-                state.size = todo!(); // randomize
-            }
-            Operation::Move => {
-                state.position = todo!() // randomize
-            }
-            Operation::Fullscreen => {
-                state.fullscreen = true;
-            }
-            Operation::Unfullscreen => {
-                state.fullscreen = false;
-            }
-            Operation::Show => {
-                state.hidden = false;
-            }
-            Operation::Hide => {
-                state.hidden = true;
-            }
-            Operation::BringToFront => {
-                state.at_front = true;
-            }
-            Operation::Focus => {
-                state.focused = true;
-            }
-            Operation::Rename => {
-                state.title = todo!(); //randomize
-            }
+            Operation::Resize => Mutation::Size(rng.gen()),
+            Operation::Move => Mutation::Position(rng.gen()),
+            Operation::Fullscreen => Mutation::Fullscreen(true),
+            Operation::Unfullscreen => Mutation::Fullscreen(false),
+            Operation::Show => Mutation::Hidden(false),
+            Operation::Hide => Mutation::Hidden(true),
+            Operation::BringToFront => Mutation::AtFront(true),
+            Operation::Focus => Mutation::Focused(true),
+            Operation::Rename => Mutation::Title(
+                // TODO: define str length somewhere
+                String::from_utf8(rng.sample_iter(&Alphanumeric).take(16).collect()).unwrap(),
+            ),
         }
     }
 
@@ -93,7 +82,7 @@ impl Operation {
 
 impl Distribution<Operation> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Operation {
-        match rng.gen_range(0..8) {
+        match rng.gen_range(0..=8) {
             0 => Operation::Resize,
             1 => Operation::Move,
             2 => Operation::Fullscreen,
