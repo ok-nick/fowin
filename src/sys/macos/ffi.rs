@@ -33,6 +33,8 @@ pub const kAXErrorParameterizedAttributeUnsupported: i32 = -25213;
 pub const kAXErrorNotEnoughPrecision: i32 = -25214;
 
 pub const kAXFocusedUIElementAttribute: &str = "AXFocusedUIElement";
+pub const kAXFocusedUIElementChangedNotification: &str = "AXFocusedUIElementChanged";
+pub const kAXApplicationActivatedNotification: &str = "AXApplicationActivated";
 pub const kAXWindowAttribute: &str = "AXWindow";
 pub const kAXWindowsAttribute: &str = "AXWindows";
 pub const kAXMinimizedAttribute: &str = "AXMinimized";
@@ -85,6 +87,9 @@ pub type CFDictionaryRef = *const __CFDictionary;
 pub const kAXValueTypeCGSize: _bindgen_ty_1575 = 2;
 pub const kAXValueTypeCGPoint: _bindgen_ty_1575 = 1;
 pub type CFArrayRef = *const __CFArray;
+pub type CFTimeInterval = f64;
+pub type CFRunLoopRunResult = SInt32;
+pub const kCFRunLoopRunFinished: SInt32 = 1;
 
 // TODO: AXUIElementRefs can be compared for equality using CFEqual, impl Eq for Window as well
 //       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
@@ -118,6 +123,7 @@ impl Drop for AXUIElementRef {
 #[repr(C)]
 #[derive(Debug)]
 pub struct AXObserverRef(pub *mut __AXObserver);
+unsafe impl Send for AXObserverRef {}
 impl AXObserverRef {
     pub fn increment_ref_count(&self) {
         unsafe {
@@ -139,23 +145,20 @@ impl Drop for AXObserverRef {
     }
 }
 
-pub type AXObserverCallbackWithInfo = ::std::option::Option<
-    unsafe extern "C" fn(
-        observer: *mut __AXObserver,
-        element: *const __AXUIElement,
-        notification: CFStringRef,
-        info: CFDictionaryRef,
-        refcon: *mut ::std::os::raw::c_void,
-    ),
->;
-pub type AXObserverCallback = ::std::option::Option<
-    unsafe extern "C" fn(
-        observer: *mut __AXObserver,
-        element: *const __AXUIElement,
-        notification: CFStringRef,
-        refcon: *mut ::std::os::raw::c_void,
-    ),
->;
+pub type AXObserverCallbackWithInfo = unsafe extern "C" fn(
+    observer: *mut __AXObserver,
+    element: *const __AXUIElement,
+    notification: CFStringRef,
+    info: CFDictionaryRef,
+    refcon: *mut ::std::os::raw::c_void,
+);
+
+pub type AXObserverCallback = unsafe extern "C" fn(
+    observer: *mut __AXObserver,
+    element: *const __AXUIElement,
+    notification: CFStringRef,
+    refcon: *mut ::std::os::raw::c_void,
+);
 pub type AXError = SInt32;
 pub type CFRunLoopSourceRef = *mut __CFRunLoopSource;
 pub type CFRunLoopRef = *mut __CFRunLoop;
@@ -410,6 +413,20 @@ extern "C" {
     ) -> CFDictionaryRef;
 
     pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
+
+    pub fn CFRunLoopRun();
+
+    pub fn CFRunLoopRunInMode(
+        mode: CFRunLoopMode,
+        seconds: CFTimeInterval,
+        returnAfterSourceHandled: Boolean,
+    ) -> CFRunLoopRunResult;
+
+    pub fn CFStringGetMaximumSizeForEncoding(
+        length: CFIndex,
+        encoding: CFStringEncoding,
+    ) -> CFIndex;
+
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -473,6 +490,8 @@ extern "C" {
 
     pub fn AXIsProcessTrusted() -> Boolean;
 
+    pub fn AXUIElementGetPid(element: *const __AXUIElement, pid: *mut pid_t) -> AXError;
+
 }
 
 pub unsafe fn NSRunningApplication_processIdentifier(
@@ -511,11 +530,18 @@ pub unsafe fn cfstring_from_str(str: &str) -> CFStringRef {
 // NOTE: this will release the string for you
 pub fn cfstring_to_string(cfstring: CFStringRef) -> Option<String> {
     unsafe {
-        let length = CFStringGetLength(cfstring) + 1;
+        let length = CFStringGetLength(cfstring);
+        let max_length = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
         // TODO: error if length > usize
-        let mut buffer: Vec<c_char> = Vec::with_capacity(length as usize);
+        let mut buffer: Vec<c_char> = Vec::with_capacity(max_length as usize);
 
-        if CFStringGetCString(cfstring, buffer.as_mut_ptr(), length, kCFStringEncodingUTF8) != 0 {
+        if CFStringGetCString(
+            cfstring,
+            buffer.as_mut_ptr(),
+            max_length,
+            kCFStringEncodingUTF8,
+        ) != 0
+        {
             CFRelease(cfstring as *const _);
 
             Some(

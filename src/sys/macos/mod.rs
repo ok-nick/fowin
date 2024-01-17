@@ -1,16 +1,25 @@
-use std::ptr::{self};
+use std::{
+    borrow::Borrow,
+    iter::{self, Once},
+    ptr::{self},
+    sync::mpsc::{self, Receiver, Sender},
+    thread::{self, ThreadId},
+    time::Duration,
+};
 
-use crossbeam_channel::{Receiver, Sender};
-use icrate::AppKit::{NSApplicationActivationPolicyProhibited, NSWorkspace};
+use icrate::AppKit::{NSApplicationActivationPolicyRegular, NSWorkspace};
 
 use crate::protocol::{WindowError, WindowEvent};
 
-use self::ffi::{
-    kAXTrustedCheckOptionPrompt, kCFAllocatorDefault, kCFBooleanTrue, AXIsProcessTrusted,
-    AXIsProcessTrustedWithOptions, CFDictionaryCreate, CFRelease,
-    NSRunningApplication_processIdentifier,
-};
 pub use self::{application::Application, window::Window};
+use self::{
+    application::WindowIterator,
+    ffi::{
+        kAXTrustedCheckOptionPrompt, kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
+        kCFRunLoopRunFinished, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
+        CFDictionaryCreate, CFRelease, CFRunLoopRunInMode, NSRunningApplication_processIdentifier,
+    },
+};
 
 mod application;
 mod ffi;
@@ -39,39 +48,83 @@ mod window;
 #[derive(Debug)]
 pub struct Watcher {
     // TODO: the sender will be passed to newly launched apps
-    sender: Sender<WindowEvent>,
-    receiver: Receiver<WindowEvent>,
+    sender: Sender<Result<WindowEvent, WindowError>>,
+    receiver: Receiver<Result<WindowEvent, WindowError>>,
     // users only know about windows, apps aren't exposed to them
-    apps: Vec<Application>,
+    // apps: Vec<Application>,
+    watchers: Vec<application::Watcher>,
+    // TODO: keep track of disconnected applications (aka apps that failed to be watched)
+    //       and somehow interface it to the user so they can reconnect
+    thread_id: ThreadId,
 }
 
 impl Watcher {
+    // All watchers MUST be created on the same thread that this struct is created.
     pub(self) fn new(
-        sender: Sender<WindowEvent>,
-        receiver: Receiver<WindowEvent>,
-        apps: Vec<Application>,
+        sender: Sender<Result<WindowEvent, WindowError>>,
+        receiver: Receiver<Result<WindowEvent, WindowError>>,
+        // apps: Vec<Application>,
+        watchers: Vec<application::Watcher>,
     ) -> Watcher {
         Watcher {
             sender,
             receiver,
-            apps,
+            // apps,
+            watchers,
+            thread_id: thread::current().id(),
         }
     }
 
-    // since app.windows() takes a ref to the app, need to extend the lifetime to self
+    // Since app.windows() takes a ref to the app, we must extend the lifetime to self.
     pub fn iter_windows(&self) -> impl Iterator<Item = Result<Window, WindowError>> + '_ {
-        // an absolute monster of an iterator
-        self.apps.iter().flat_map(|app| {
-            app.windows()
-                .into_iter()
-                .flat_map(|windows| windows.into_iter())
-        })
+        //TODO: iter_windows_with_app_iter(self.apps.iter())
+        iter_windows_with_app_iter(iter_apps())
     }
 
-    pub fn next_request(&self) -> WindowEvent {
-        // It can only error if the sender is disconnected, but that's not possible because we
-        // always have a reference to the sender within this struct.
-        self.receiver.recv().unwrap()
+    pub fn reconnect(&self) {
+        // TODO: this function will attempt to reconnect failed-to-connect watchers
+    }
+
+    // TODO: This function MUST be called on the thread its watchers were created (preferably main thread for perf/responsiveness?)
+    //       it would be better if I can separate the sender logic from the event loop logic so that they can be used separately (and
+    //       so that checking the current thread + other things isn't required every iteration)
+    pub fn next_request(&self) -> Result<WindowEvent, WindowError> {
+        assert!(
+            thread::current().id() == self.thread_id,
+            "can only get next request on the same thread the `Watcher` was created"
+        );
+
+        loop {
+            let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, f64::MAX, true as u8) };
+            if result == kCFRunLoopRunFinished {
+                // TODO: in this case there are no watchers watching, either because they all failed to connect (introduce reconnecting)
+                //       or there are literally no windows to watch (doubt will ever be the case). Nevertheless, if this error occurs every
+                //       time this function is called, CPU usage will skyrocket, so perhaps add some sort of delay?
+                //
+                //       essentially, we are waiting for a new application to be launched and a new internal watcher to be created. maybe
+                //       we can signify with an event
+            }
+
+            // It can only error w/ disconnected if the sender is disconnected, but that's not possible because we
+            // always have a reference to the sender within this struct. If it errors with empty then we skip to the
+            // next iteration.
+            if let Ok(event) = self.receiver.try_recv() {
+                return event;
+            }
+        }
+    }
+
+    // TODO: this function will call CFRunLoopInMode w/ interval seconds
+    pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
+        todo!()
+    }
+
+    // TODO: same as above, but orders the output
+    pub fn next_request_buffered_ordered(
+        &self,
+        interval: Duration,
+    ) -> Result<WindowEvent, WindowError> {
+        todo!()
     }
 }
 
@@ -103,34 +156,73 @@ pub fn request_trust() -> Result<bool, WindowError> {
 }
 
 pub fn iter_windows() -> impl Iterator<Item = Result<Window, WindowError>> {
-    iter_apps().flat_map(|app| app.windows()).flatten()
+    iter_windows_with_app_iter(iter_apps())
 }
 
 pub fn watch() -> Result<Watcher, WindowError> {
-    let (sender, receiver) = crossbeam_channel::unbounded();
-    let apps = iter_apps()
-        // TODO: if it fails should we stop the whole thing or somehow notify upstream that this app failed to be watched?
-        .map_while(|app| app.watch(sender.clone()).ok().map(|_| app))
+    let (sender, receiver) = mpsc::channel();
+    let watchers = iter_apps()
+        .filter_map(|app| match app.watch(sender.clone()) {
+            Ok(watcher) => Some(watcher),
+            Err(err) => {
+                // TODO: in this case, we need to somehow give the users the option to attempt to reconnect to the app
+                // Safe to unwrap, we created the sender right above, so we know it's connected and empty.
+                sender.send(Err(err)).unwrap();
+                None
+            }
+        })
         .collect();
 
     // TODO: add KV observing on NSWorkspace.runningApplications to find when an app is opened/closed and add/remove it from self.apps
 
-    Ok(Watcher::new(sender, receiver, apps))
+    Ok(Watcher::new(sender, receiver, watchers))
+}
+
+#[inline]
+fn iter_windows_with_app_iter(
+    app_iter: impl Iterator<Item = impl Borrow<Application>>,
+) -> impl Iterator<Item = Result<Window, WindowError>> {
+    app_iter.flat_map(|app| {
+        app.borrow()
+            .windows()
+            .map(WindowIteratorOrErr::WindowIterator)
+            .unwrap_or_else(|err| WindowIteratorOrErr::Err(iter::once(Err(err))))
+    })
 }
 
 fn iter_apps() -> impl Iterator<Item = Application> {
     unsafe { NSWorkspace::sharedWorkspace().runningApplications() }
         .into_iter()
-        .filter(|app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicyProhibited)
+        // TODO: I believe an NSApplicationActivationPolicyAccessory type of app can also spawn their own windows,
+        //       however, many times they fail to be watched and can take a few seconds to respond. TLDR; do some research
+        // .filter(|app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicyProhibited)
+        .filter(|app| unsafe { app.activationPolicy() } == NSApplicationActivationPolicyRegular)
         .map_while(|app| {
             let pid = unsafe { NSRunningApplication_processIdentifier(&app) };
-            // if it's -1 then it isn't associated with a process
+            // if it's -1 then the app isn't associated with a process
             if pid != -1 {
                 Some(Application::new(pid))
             } else {
                 None
             }
         })
+}
+
+#[derive(Debug)]
+enum WindowIteratorOrErr {
+    WindowIterator(WindowIterator),
+    Err(Once<Result<Window, WindowError>>),
+}
+
+impl Iterator for WindowIteratorOrErr {
+    type Item = Result<Window, WindowError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            WindowIteratorOrErr::WindowIterator(iter) => iter.next(),
+            WindowIteratorOrErr::Err(iter) => iter.next(),
+        }
+    }
 }
 
 impl WindowError {

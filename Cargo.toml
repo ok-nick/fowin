@@ -8,8 +8,7 @@ license = "MIT"
 members = [".", "crates/*"]
 
 [dependencies]
-crossbeam-channel = "0.5.10"
-icrate = { version = "0.0.4", features = [
+icrate = { version = "0.1.0", features = [
   "AppKit",
   "AppKit_NSWorkspace",
   "AppKit_NSRunningApplication",

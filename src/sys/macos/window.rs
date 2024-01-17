@@ -3,7 +3,10 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use icrate::Foundation::{CGPoint, CGSize};
+use icrate::{
+    AppKit::NSWorkspace,
+    Foundation::{CGPoint, CGSize},
+};
 
 use crate::{
     protocol::{Position, Size, WindowError, WindowId},
@@ -16,10 +19,12 @@ use super::ffi::{
     kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse, kCFBooleanTrue,
     AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
     AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
-    CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, kAXValueTypeCGPoint,
-    CFArrayGetValueAtIndex,
+    CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, __AXUIElement,
+    kAXFocusedWindowAttribute, kAXValueTypeCGPoint, pid_t, AXUIElementGetPid,
+    CFArrayGetValueAtIndex, NSRunningApplication_processIdentifier,
 };
 
+// TODO: I believe we can do CFEqual on the AXUIElementRef rather than id comparisons
 #[derive(Debug, Clone)]
 pub struct Window {
     // NOTE:
@@ -91,11 +96,6 @@ impl Window {
         }
     }
 
-    // TODO: can I do this here? it would be most logical..
-    // pub fn focused(&self) -> u32 {
-    //     todo!()
-    // }
-
     pub fn size(&self) -> Result<Size, WindowError> {
         let mut size: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
@@ -163,6 +163,47 @@ impl Window {
                 })
             } else {
                 Err(WindowError::InvalidInternalArgument)
+            }
+        } else {
+            Err(WindowError::from_ax_error(result))
+        }
+    }
+
+    pub fn focused(&self) -> Result<bool, WindowError> {
+        let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
+        let result = unsafe {
+            AXUIElementCopyAttributeValue(
+                self.app_handle.0,
+                cfstring_from_str(kAXFocusedWindowAttribute),
+                window.as_mut_ptr() as *mut _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            let window = AXUIElementRef(unsafe { window.assume_init() });
+            // This tells us that this window was the last focused window within the application's windows.
+            match _id(&window)? == self.id()? {
+                true => {
+                    // Now we need to get the pid for the current window.
+                    let mut self_pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
+                    let result =
+                        unsafe { AXUIElementGetPid(self.app_handle.0, self_pid.as_mut_ptr()) };
+                    if result == kAXErrorSuccess {
+                        // Next, get the pid for the focused application.
+                        match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
+                            Some(app) => {
+                                let self_pid = unsafe { self_pid.assume_init() };
+                                let focused_pid =
+                                    unsafe { NSRunningApplication_processIdentifier(&app) };
+                                // If the focused app is this window's app, then success!
+                                Ok(self_pid == focused_pid)
+                            }
+                            None => Ok(false),
+                        }
+                    } else {
+                        Ok(false)
+                    }
+                }
+                false => Ok(false),
             }
         } else {
             Err(WindowError::from_ax_error(result))
@@ -379,7 +420,7 @@ impl Window {
 
 // NOTE: this operation is pretty quick ~60 microseconds
 // TODO: interesting notes from yabai about ids: https://github.com/koekeishiya/yabai/blob/edb34504d1caa7bfa33a97ff46f3570b9f2f7e3d/src/window_manager.c#L1438
-fn _id(inner: &AXUIElementRef) -> Result<WindowId, WindowError> {
+pub(super) fn _id(inner: &AXUIElementRef) -> Result<WindowId, WindowError> {
     let mut id = MaybeUninit::zeroed();
     let result = unsafe { _AXUIElementGetWindow(inner.0, id.as_mut_ptr()) };
     if result == kAXErrorSuccess {

@@ -37,6 +37,12 @@ impl Window {
         self.0.position()
     }
 
+    /// Whether or not the window is focused.
+    #[inline]
+    pub fn focused(&self) -> Result<bool, WindowError> {
+        self.0.focused()
+    }
+
     /// Whether or not the window is fullscreened.
     #[inline]
     pub fn fullscreened(&self) -> Result<bool, WindowError> {

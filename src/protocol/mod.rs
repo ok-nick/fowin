@@ -70,65 +70,51 @@ pub struct Size {
 // https://github.com/LGUG2Z/komorebi/blob/42ac13e0bd24c2775874cac891826024054e4e3c/komorebi/src/window_manager_event.rs#L127
 
 /// The kind of window event that was sent.
-#[derive(Debug, PartialEq, Eq)]
-pub enum WindowEventKind {
+#[derive(Debug)]
+pub enum WindowEventInfo {
     /// The window was first opened.
-    Opened,
+    Opened(Window),
     /// The window was closed.
-    Closed,
+    Closed(WindowId),
     /// The window was hidden.
-    Hidden,
+    Hidden(Window),
     /// The window was shown.
-    Shown,
+    Shown(Window),
     /// The window was focused.
-    Focused,
+    Focused(Window),
     /// The window was moved.
-    Moved,
+    Moved(Window),
     /// The window was resized.
-    Resized,
+    Resized(Window),
     /// The window title was renamed.
-    Renamed,
+    Renamed(Window),
 }
 
 /// An event signifying a change in window properties.
 #[derive(Debug)]
 pub struct WindowEvent {
-    kind: WindowEventKind,
-    window: Window,
+    info: WindowEventInfo,
+    // window: Window,
     timestamp: Instant,
 }
 
 impl WindowEvent {
-    /// Create a new [`WindowEvent`](WindowEvent) with the specified event kind and window.
-    pub fn new(kind: WindowEventKind, window: Window) -> WindowEvent {
+    /// Create a new [`WindowEvent`](WindowEvent) with the specified event info.
+    pub fn new(info: WindowEventInfo) -> WindowEvent {
         WindowEvent {
-            kind,
-            window,
+            info,
             timestamp: Instant::now(),
         }
     }
 
-    /// Create a new [`WindowEvent`](WindowEvent) with the specified kind, window, and timestamp.
-    pub fn with_timestamp(
-        kind: WindowEventKind,
-        window: Window,
-        timestamp: Instant,
-    ) -> WindowEvent {
-        WindowEvent {
-            kind,
-            window,
-            timestamp,
-        }
+    /// Create a new [`WindowEvent`](WindowEvent) with the specified event info and timestamp.
+    pub fn with_timestamp(info: WindowEventInfo, timestamp: Instant) -> WindowEvent {
+        WindowEvent { info, timestamp }
     }
 
-    /// Returns the kind of window event.
-    pub fn kind(&self) -> &WindowEventKind {
-        &self.kind
-    }
-
-    /// Returns a reference to the [Window](Window) that caused the event.
-    pub fn window(&self) -> &Window {
-        &self.window
+    /// Returns the info of the window event.
+    pub fn info(&self) -> &WindowEventInfo {
+        &self.info
     }
 
     /// Returns whethere this window event happened before the specified window event.

@@ -1,7 +1,7 @@
 #![feature(mutex_unpoison)]
 
 use protocol::WindowEvent;
-pub use protocol::{Position, Size, Window, WindowError, WindowEventKind, WindowId};
+pub use protocol::{Position, Size, Window, WindowError, WindowEventInfo, WindowId};
 
 mod protocol;
 mod sys;
@@ -25,7 +25,7 @@ impl Watcher {
     /// Note, these events are not guaranteed to be precisely ordered. However, they do provide
     /// a timestamp that can be used for ordering. Consider buffering events if order is important.
     #[inline]
-    pub fn next_request(&self) -> WindowEvent {
+    pub fn next_request(&self) -> Result<WindowEvent, WindowError> {
         self.0.next_request()
     }
 }
@@ -38,7 +38,7 @@ pub fn trusted() -> bool {
 
 /// Requests permission from the operating systems to access the necessary APIs.
 ///
-/// This option may open a prompt for the user to accept.
+/// On macOS, this function will open a prompt for the user to accept.
 #[inline]
 pub fn request_trust() -> Result<bool, WindowError> {
     sys::request_trust()
