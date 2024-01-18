@@ -69,9 +69,9 @@ pub struct Size {
 // NOTE: komorebi doesn't listen to EVENT_OBJECT_CREATE because "some apps like firefox" don't send them
 // https://github.com/LGUG2Z/komorebi/blob/42ac13e0bd24c2775874cac891826024054e4e3c/komorebi/src/window_manager_event.rs#L127
 
-/// The kind of window event that was sent.
+/// An event signifying a change in window properties.
 #[derive(Debug)]
-pub enum WindowEventInfo {
+pub enum WindowEvent {
     /// The window was first opened.
     Opened(Window),
     /// The window was closed.
@@ -88,39 +88,6 @@ pub enum WindowEventInfo {
     Resized(Window),
     /// The window title was renamed.
     Renamed(Window),
-}
-
-/// An event signifying a change in window properties.
-#[derive(Debug)]
-pub struct WindowEvent {
-    info: WindowEventInfo,
-    // window: Window,
-    timestamp: Instant,
-}
-
-impl WindowEvent {
-    /// Create a new [`WindowEvent`](WindowEvent) with the specified event info.
-    pub fn new(info: WindowEventInfo) -> WindowEvent {
-        WindowEvent {
-            info,
-            timestamp: Instant::now(),
-        }
-    }
-
-    /// Create a new [`WindowEvent`](WindowEvent) with the specified event info and timestamp.
-    pub fn with_timestamp(info: WindowEventInfo, timestamp: Instant) -> WindowEvent {
-        WindowEvent { info, timestamp }
-    }
-
-    /// Returns the info of the window event.
-    pub fn info(&self) -> &WindowEventInfo {
-        &self.info
-    }
-
-    /// Returns whethere this window event happened before the specified window event.
-    pub fn before(&self, other: WindowEvent) -> bool {
-        self.timestamp < other.timestamp
-    }
 }
 
 // TODO: add context to errors

@@ -79,6 +79,12 @@ impl Window {
         self.0.translate(position)
     }
 
+    /// Focus the window.
+    #[inline]
+    pub fn focus(&self) -> Result<(), WindowError> {
+        self.0.focus()
+    }
+
     /// Fullscreen the window.
     #[inline]
     pub fn fullscreen(&self) -> Result<(), WindowError> {

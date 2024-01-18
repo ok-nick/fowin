@@ -4,7 +4,8 @@ use std::{
 };
 
 use icrate::{
-    AppKit::NSWorkspace,
+    objc2::{msg_send_id, rc::Id, ClassType},
+    AppKit::{NSApplicationActivateIgnoringOtherApps, NSRunningApplication, NSWorkspace},
     Foundation::{CGPoint, CGSize},
 };
 
@@ -21,7 +22,7 @@ use super::ffi::{
     AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
     CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, __AXUIElement,
     kAXFocusedWindowAttribute, kAXValueTypeCGPoint, pid_t, AXUIElementGetPid,
-    CFArrayGetValueAtIndex, NSRunningApplication_processIdentifier,
+    CFArrayGetValueAtIndex, CGWindowID, NSRunningApplication_processIdentifier,
 };
 
 // TODO: I believe we can do CFEqual on the AXUIElementRef rather than id comparisons
@@ -42,6 +43,7 @@ pub struct Window {
 // TODO: create a trait for this
 // TODO: reduce boilerplate between some of these methods
 impl Window {
+    // TODO: add timeouts like for applications
     pub(super) fn new(
         inner: AXUIElementRef,
         app_handle: AXUIElementRef,
@@ -183,24 +185,15 @@ impl Window {
             // This tells us that this window was the last focused window within the application's windows.
             match _id(&window)? == self.id()? {
                 true => {
-                    // Now we need to get the pid for the current window.
-                    let mut self_pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
-                    let result =
-                        unsafe { AXUIElementGetPid(self.app_handle.0, self_pid.as_mut_ptr()) };
-                    if result == kAXErrorSuccess {
-                        // Next, get the pid for the focused application.
-                        match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
-                            Some(app) => {
-                                let self_pid = unsafe { self_pid.assume_init() };
-                                let focused_pid =
-                                    unsafe { NSRunningApplication_processIdentifier(&app) };
-                                // If the focused app is this window's app, then success!
-                                Ok(self_pid == focused_pid)
-                            }
-                            None => Ok(false),
+                    // Next, get the pid for the focused application.
+                    match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
+                        Some(app) => {
+                            let focused_pid =
+                                unsafe { NSRunningApplication_processIdentifier(&app) };
+                            // If the focused app is this window's app, then success!
+                            Ok(self.pid()? == focused_pid)
                         }
-                    } else {
-                        Ok(false)
+                        None => Ok(false),
                     }
                 }
                 false => Ok(false),
@@ -291,6 +284,21 @@ impl Window {
         }
     }
 
+    pub fn focus(&self) -> Result<(), WindowError> {
+        self.bring_to_front()?;
+
+        unsafe {
+            let app: Id<NSRunningApplication> = msg_send_id![
+                NSRunningApplication::class(),
+                runningApplicationWithProcessIdentifier: self.pid()?
+            ];
+            // TODO: supposedly this option is deprecated, but it does provide the behavior we want, TEST IT
+            //       this method also returns a bool signifying if the app has quit or if it can be activated
+            app.activateWithOptions(NSApplicationActivateIgnoringOtherApps);
+        }
+        todo!()
+    }
+
     pub fn fullscreen(&self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
@@ -371,6 +379,16 @@ impl Window {
         }
     }
 
+    fn pid(&self) -> Result<pid_t, WindowError> {
+        let mut self_pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
+        let result = unsafe { AXUIElementGetPid(self.app_handle.0, self_pid.as_mut_ptr()) };
+        if result == kAXErrorSuccess {
+            Ok(unsafe { self_pid.assume_init() })
+        } else {
+            Err(WindowError::from_ax_error(result))
+        }
+    }
+
     fn read_inner(&self) -> Result<RwLockReadGuard<AXUIElementRef>, WindowError> {
         if self.exists()? {
             // exists() is called on the same thread, so if the thread was poisoned, it would never reach here anyways, therefore the unwrap is safe
@@ -421,7 +439,7 @@ impl Window {
 // NOTE: this operation is pretty quick ~60 microseconds
 // TODO: interesting notes from yabai about ids: https://github.com/koekeishiya/yabai/blob/edb34504d1caa7bfa33a97ff46f3570b9f2f7e3d/src/window_manager.c#L1438
 pub(super) fn _id(inner: &AXUIElementRef) -> Result<WindowId, WindowError> {
-    let mut id = MaybeUninit::zeroed();
+    let mut id: MaybeUninit<CGWindowID> = MaybeUninit::zeroed();
     let result = unsafe { _AXUIElementGetWindow(inner.0, id.as_mut_ptr()) };
     if result == kAXErrorSuccess {
         Ok(unsafe { id.assume_init() })

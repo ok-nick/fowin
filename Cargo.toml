@@ -17,4 +17,7 @@ icrate = { version = "0.1.0", features = [
   "Foundation_NSNotification",
   "Foundation_NSNotificationCenter",
   "Foundation_NSOperationQueue",
+  "Foundation_NSDictionary",
+  "Foundation_NSRunLoop",
+  "Foundation_NSDate",
 ] }

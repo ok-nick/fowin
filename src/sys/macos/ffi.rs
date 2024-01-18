@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+// TODO: thread info:
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 #![allow(unused)]
@@ -32,9 +33,9 @@ pub const kAXErrorNoValue: i32 = -25212;
 pub const kAXErrorParameterizedAttributeUnsupported: i32 = -25213;
 pub const kAXErrorNotEnoughPrecision: i32 = -25214;
 
+pub const kAXDescriptionAttribute: &str = "AXDescription";
+pub const kAXEnabledAttribute: &str = "AXEnabled";
 pub const kAXFocusedUIElementAttribute: &str = "AXFocusedUIElement";
-pub const kAXFocusedUIElementChangedNotification: &str = "AXFocusedUIElementChanged";
-pub const kAXApplicationActivatedNotification: &str = "AXApplicationActivated";
 pub const kAXWindowAttribute: &str = "AXWindow";
 pub const kAXWindowsAttribute: &str = "AXWindows";
 pub const kAXMinimizedAttribute: &str = "AXMinimized";
@@ -48,6 +49,8 @@ pub const kAXFullScreenAttribute: &str = "AXFullScreen";
 pub const kAXHiddenAttribute: &str = "AXHidden";
 pub const kAXRaiseAction: &str = "AXRaise";
 
+pub const kAXFocusedUIElementChangedNotification: &str = "AXFocusedUIElementChanged";
+pub const kAXApplicationActivatedNotification: &str = "AXApplicationActivated";
 pub const kAXResizedNotification: &str = "AXResized";
 pub const kAXApplicationHiddenNotification: &str = "AXApplicationHidden";
 pub const kAXApplicationShownNotification: &str = "AXApplicationShown";
@@ -94,7 +97,7 @@ pub const kCFRunLoopRunFinished: SInt32 = 1;
 // TODO: AXUIElementRefs can be compared for equality using CFEqual, impl Eq for Window as well
 //       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
 //       https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L305
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug)]
 pub struct AXUIElementRef(pub *const __AXUIElement);
 impl AXUIElementRef {
@@ -120,7 +123,7 @@ impl Drop for AXUIElementRef {
     }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug)]
 pub struct AXObserverRef(pub *mut __AXObserver);
 unsafe impl Send for AXObserverRef {}
@@ -145,6 +148,56 @@ impl Drop for AXObserverRef {
     }
 }
 
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct CFRunLoopSourceRef(pub *mut __CFRunLoopSource);
+unsafe impl Send for CFRunLoopSourceRef {}
+impl CFRunLoopSourceRef {
+    pub fn increment_ref_count(&self) {
+        unsafe {
+            CFRetain(self.0 as *const _);
+        }
+    }
+}
+impl Clone for CFRunLoopSourceRef {
+    fn clone(&self) -> Self {
+        self.increment_ref_count();
+        CFRunLoopSourceRef(self.0)
+    }
+}
+impl Drop for CFRunLoopSourceRef {
+    fn drop(&mut self) {
+        unsafe {
+            CFRelease(self.0 as *const _ as *const _);
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct CFRunLoopRef(pub *mut __CFRunLoopSource);
+unsafe impl Send for CFRunLoopRef {}
+impl CFRunLoopRef {
+    pub fn increment_ref_count(&self) {
+        unsafe {
+            CFRetain(self.0 as *const _);
+        }
+    }
+}
+impl Clone for CFRunLoopRef {
+    fn clone(&self) -> Self {
+        self.increment_ref_count();
+        CFRunLoopRef(self.0)
+    }
+}
+impl Drop for CFRunLoopRef {
+    fn drop(&mut self) {
+        unsafe {
+            CFRelease(self.0 as *const _ as *const _);
+        }
+    }
+}
+
 pub type AXObserverCallbackWithInfo = unsafe extern "C" fn(
     observer: *mut __AXObserver,
     element: *const __AXUIElement,
@@ -160,8 +213,6 @@ pub type AXObserverCallback = unsafe extern "C" fn(
     refcon: *mut ::std::os::raw::c_void,
 );
 pub type AXError = SInt32;
-pub type CFRunLoopSourceRef = *mut __CFRunLoopSource;
-pub type CFRunLoopRef = *mut __CFRunLoop;
 pub type CFRunLoopMode = CFStringRef;
 
 pub type CFDictionaryRetainCallBack = ::std::option::Option<
@@ -266,6 +317,44 @@ pub struct CFDictionaryValueCallBacks {
     pub equal: CFDictionaryEqualCallBack,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CFRunLoopSourceContext {
+    pub version: CFIndex,
+    pub info: *mut ::std::os::raw::c_void,
+    pub retain: ::std::option::Option<
+        unsafe extern "C" fn(info: *const ::std::os::raw::c_void) -> *const ::std::os::raw::c_void,
+    >,
+    pub release: ::std::option::Option<unsafe extern "C" fn(info: *const ::std::os::raw::c_void)>,
+    pub copyDescription: ::std::option::Option<
+        unsafe extern "C" fn(info: *const ::std::os::raw::c_void) -> CFStringRef,
+    >,
+    pub equal: ::std::option::Option<
+        unsafe extern "C" fn(
+            info1: *const ::std::os::raw::c_void,
+            info2: *const ::std::os::raw::c_void,
+        ) -> Boolean,
+    >,
+    pub hash: ::std::option::Option<
+        unsafe extern "C" fn(info: *const ::std::os::raw::c_void) -> CFHashCode,
+    >,
+    pub schedule: ::std::option::Option<
+        unsafe extern "C" fn(
+            info: *mut ::std::os::raw::c_void,
+            rl: *mut __CFRunLoopSource,
+            mode: CFRunLoopMode,
+        ),
+    >,
+    pub cancel: ::std::option::Option<
+        unsafe extern "C" fn(
+            info: *mut ::std::os::raw::c_void,
+            rl: *mut __CFRunLoopSource,
+            mode: CFRunLoopMode,
+        ),
+    >,
+    pub perform: ::std::option::Option<unsafe extern "C" fn(info: *mut ::std::os::raw::c_void)>,
+}
+
 pub type CFArrayRetainCallBack = ::std::option::Option<
     unsafe extern "C" fn(
         allocator: CFAllocatorRef,
@@ -326,6 +415,7 @@ extern "C" {
 extern "C" {
     pub static kCFAllocatorDefault: CFAllocatorRef;
     pub static kCFRunLoopDefaultMode: CFRunLoopMode;
+    pub static kCFRunLoopCommonModes: CFRunLoopMode;
     pub static kCFBooleanTrue: CFBooleanRef;
     pub static kCFBooleanFalse: CFBooleanRef;
 
@@ -362,11 +452,15 @@ extern "C" {
         isExternalRepresentation: Boolean,
     ) -> CFStringRef;
 
-    pub fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFRunLoopMode);
+    pub fn CFRunLoopAddSource(
+        rl: *mut __CFRunLoopSource,
+        source: *mut __CFRunLoopSource,
+        mode: CFRunLoopMode,
+    );
 
-    pub fn CFRunLoopGetMain() -> CFRunLoopRef;
+    pub fn CFRunLoopGetMain() -> *mut __CFRunLoopSource;
 
-    pub fn CFRunLoopSourceInvalidate(source: CFRunLoopSourceRef);
+    pub fn CFRunLoopSourceInvalidate(source: *mut __CFRunLoopSource);
 
     pub fn CFRelease(cf: CFTypeRef);
 
@@ -412,7 +506,7 @@ extern "C" {
         valueCallBacks: *const CFDictionaryValueCallBacks,
     ) -> CFDictionaryRef;
 
-    pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
+    pub fn CFRunLoopGetCurrent() -> *mut __CFRunLoopSource;
 
     pub fn CFRunLoopRun();
 
@@ -427,6 +521,23 @@ extern "C" {
         encoding: CFStringEncoding,
     ) -> CFIndex;
 
+    pub fn CFRunLoopSourceSignal(source: *mut __CFRunLoopSource);
+
+    pub fn CFRunLoopSourceCreate(
+        allocator: CFAllocatorRef,
+        order: CFIndex,
+        context: *mut CFRunLoopSourceContext,
+    ) -> *mut __CFRunLoopSource;
+
+    pub fn CFRunLoopWakeUp(rl: *mut __CFRunLoopSource);
+
+    pub fn CFDictionaryGetKeysAndValues(
+        theDict: CFDictionaryRef,
+        keys: *mut *const ::std::os::raw::c_void,
+        values: *mut *const ::std::os::raw::c_void,
+    );
+
+    pub fn CFDictionaryGetCount(theDict: CFDictionaryRef) -> CFIndex;
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -448,7 +559,7 @@ extern "C" {
         refcon: *mut ::std::os::raw::c_void,
     ) -> AXError;
 
-    pub fn AXObserverGetRunLoopSource(observer: *mut __AXObserver) -> CFRunLoopSourceRef;
+    pub fn AXObserverGetRunLoopSource(observer: *mut __AXObserver) -> *mut __CFRunLoopSource;
 
     pub fn AXObserverRemoveNotification(
         observer: *mut __AXObserver,
@@ -492,6 +603,18 @@ extern "C" {
 
     pub fn AXUIElementGetPid(element: *const __AXUIElement, pid: *mut pid_t) -> AXError;
 
+    pub fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+
+    pub fn AXUIElementSetMessagingTimeout(
+        element: *const __AXUIElement,
+        timeoutInSeconds: f32,
+    ) -> AXError;
+
+    pub fn AXUIElementIsAttributeSettable(
+        element: *const __AXUIElement,
+        attribute: CFStringRef,
+        settable: *mut Boolean,
+    ) -> AXError;
 }
 
 pub unsafe fn NSRunningApplication_processIdentifier(

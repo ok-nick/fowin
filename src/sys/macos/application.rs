@@ -1,8 +1,18 @@
-use std::{mem::MaybeUninit, os::raw, sync::mpsc::Sender, time::Instant};
+use std::{
+    mem::MaybeUninit,
+    os::raw,
+    ptr,
+    sync::mpsc::Sender,
+    time::{Duration, Instant},
+};
 
 use crate::{
-    protocol::{self, WindowError, WindowEvent, WindowEventInfo},
-    sys::platform::ffi::{cfstring_to_string, CFArrayGetCount, CFArrayGetValueAtIndex, CFRetain},
+    protocol::{self, WindowError, WindowEvent},
+    sys::platform::ffi::{
+        self, cfstring_to_string, kAXRaiseAction, kAXTitleAttribute, kAXWindowAttribute,
+        AXUIElementGetPid, AXUIElementIsAttributeSettable, AXUIElementPerformAction, Boolean,
+        CFArrayGetCount, CFArrayGetValueAtIndex, CFRetain,
+    },
     WindowId,
 };
 
@@ -17,22 +27,46 @@ use super::{
         AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, CFArrayRef,
         CFRelease, CFRunLoopAddSource, CFRunLoopGetCurrent, CFStringRef, __AXObserver,
         __AXUIElement, kAXApplicationActivatedNotification, kAXErrorNotificationUnsupported,
+        AXUIElementSetMessagingTimeout, _AXUIElementGetWindow, kAXErrorCannotComplete,
+        CFRunLoopGetMain, CFRunLoopRef, CGWindowID, __CFRunLoopSource,
     },
     window::{Window, _id},
 };
+
+const DEFAULT_AX_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct Application {
     inner: AXUIElementRef,
     pid: pid_t,
+    timeout: Duration,
 }
 
 impl Application {
     pub fn new(pid: pid_t) -> Application {
-        Application {
-            inner: AXUIElementRef(unsafe { AXUIElementCreateApplication(pid) }),
-            pid,
+        Application::with_timeout(pid, DEFAULT_AX_TIMEOUT)
+    }
+
+    // TODO: timeouts should be exposed to the user
+    pub fn with_timeout(pid: pid_t, timeout: Duration) -> Application {
+        let inner = AXUIElementRef(unsafe { AXUIElementCreateApplication(pid) });
+        unsafe {
+            AXUIElementSetMessagingTimeout(inner.0, timeout.as_secs_f32());
         }
+
+        Application {
+            inner,
+            pid,
+            timeout,
+        }
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    pub fn pid(&self) -> pid_t {
+        self.pid
     }
 
     pub fn windows(&self) -> Result<WindowIterator, WindowError> {
@@ -48,13 +82,26 @@ impl Application {
 
     pub fn supported(&self) {
         // TODO: return a list of notifications that are able to be registered by this app
+        //       probably should do it on a window level, since we register windows now
     }
 
     pub fn watch(
-        self,
+        &self,
         sender: Sender<Result<WindowEvent, WindowError>>,
     ) -> Result<Watcher, WindowError> {
         Watcher::new(self, sender)
+    }
+
+    // Some processes aren't immediately accessible by the AX API and default to erroring with kAXErrorCannotComplete.
+    // In that case, we should retry (ideally on a separate thread) until timeout is reached. Some applications already
+    // take more than 1 second to respond, although, those applications typically don't allow access to their AX APIs
+    // anyways. If there is a valid application that takes over 1 second to respond (extremely unlikely), then oops.
+    pub(crate) fn should_wait(&self) -> bool {
+        let mut _id: MaybeUninit<CGWindowID> = MaybeUninit::zeroed();
+        unsafe {
+            _AXUIElementGetWindow(self.inner.0, _id.as_mut_ptr() as *mut _)
+                == kAXErrorCannotComplete
+        }
     }
 }
 
@@ -96,7 +143,7 @@ impl Drop for WindowIterator {
 
 #[derive(Debug)]
 pub struct Watcher {
-    // Resourecs are implicitly dropped after observer, so it's safe.
+    // Resources are implicitly dropped after observer, so it's safe.
     observer: AXObserverRef,
     resources: Vec<Box<CallbackInfo>>,
 }
@@ -138,7 +185,7 @@ impl Watcher {
     ];
 
     pub fn new(
-        app: Application,
+        app: &Application,
         sender: Sender<Result<WindowEvent, WindowError>>,
     ) -> Result<Watcher, WindowError> {
         let mut observer = MaybeUninit::uninit();
@@ -157,6 +204,9 @@ impl Watcher {
                     let window_handle = AXUIElementRef(unsafe {
                         CFArrayGetValueAtIndex(raw_windows, i) as *const _
                     });
+                    unsafe {
+                        AXUIElementSetMessagingTimeout(window_handle.0, app.timeout.as_secs_f32());
+                    }
                     let info = Box::into_raw(Box::new(CallbackInfo {
                         sender: sender.clone(),
                         notification: Notification::Destroyed(_id(&window_handle)?),
@@ -209,20 +259,22 @@ impl Watcher {
                     resources.push(unsafe { Box::from_raw(info) });
                 }
 
-                unsafe {
-                    CFRunLoopAddSource(
-                        CFRunLoopGetCurrent(),
-                        AXObserverGetRunLoopSource(observer.0),
-                        kCFRunLoopDefaultMode, // TODO: test using common modes, see if it's more responsive
-                    );
-                }
-
                 Ok(Watcher {
                     observer,
                     resources,
                 })
             }
             _ => Err(WindowError::from_ax_error(result)),
+        }
+    }
+
+    pub(crate) fn run_on_thread(&self, thread_loop: *mut __CFRunLoopSource) {
+        unsafe {
+            CFRunLoopAddSource(
+                thread_loop,
+                AXObserverGetRunLoopSource(self.observer.0),
+                kCFRunLoopDefaultMode,
+            );
         }
     }
 
@@ -276,20 +328,20 @@ pub enum Notification {
 
 impl Notification {
     // TODO: kind of meh function that relies on the caller guaranteeing some constraints
-    pub fn info(&self, window: Option<Window>) -> WindowEventInfo {
+    pub fn info(&self, window: Option<Window>) -> WindowEvent {
         let window = window.map(protocol::Window);
         match self {
-            Notification::Created(_) => WindowEventInfo::Opened(window.unwrap()),
-            Notification::Destroyed(id) => WindowEventInfo::Closed(*id),
-            Notification::Focused(_) => WindowEventInfo::Focused(window.unwrap()),
-            Notification::Activated(_) => WindowEventInfo::Focused(window.unwrap()),
-            Notification::Moved(_) => WindowEventInfo::Moved(window.unwrap()),
-            Notification::Resized(_) => WindowEventInfo::Resized(window.unwrap()),
-            Notification::Renamed(_) => WindowEventInfo::Renamed(window.unwrap()),
-            Notification::Shown(_) => WindowEventInfo::Shown(window.unwrap()),
-            Notification::Hidden(_) => WindowEventInfo::Hidden(window.unwrap()),
-            Notification::Miniaturized(_) => WindowEventInfo::Shown(window.unwrap()),
-            Notification::Deminiaturized(_) => WindowEventInfo::Hidden(window.unwrap()),
+            Notification::Created(_) => WindowEvent::Opened(window.unwrap()),
+            Notification::Destroyed(id) => WindowEvent::Closed(*id),
+            Notification::Focused(_) => WindowEvent::Focused(window.unwrap()),
+            Notification::Activated(_) => WindowEvent::Focused(window.unwrap()),
+            Notification::Moved(_) => WindowEvent::Moved(window.unwrap()),
+            Notification::Resized(_) => WindowEvent::Resized(window.unwrap()),
+            Notification::Renamed(_) => WindowEvent::Renamed(window.unwrap()),
+            Notification::Shown(_) => WindowEvent::Shown(window.unwrap()),
+            Notification::Hidden(_) => WindowEvent::Hidden(window.unwrap()),
+            Notification::Miniaturized(_) => WindowEvent::Shown(window.unwrap()),
+            Notification::Deminiaturized(_) => WindowEvent::Hidden(window.unwrap()),
         }
     }
 }
@@ -308,8 +360,6 @@ unsafe extern "C" fn app_notification(
     notification: CFStringRef,
     refcon: *mut raw::c_void,
 ) {
-    let timestamp = Instant::now();
-
     // TODO: temp
     unsafe {
         CFRetain(notification as *const _);
@@ -317,7 +367,7 @@ unsafe extern "C" fn app_notification(
     println!("{:?}", cfstring_to_string(notification));
 
     let callback_info = refcon as *mut CallbackInfo;
-    let info = match &(*callback_info).notification {
+    let event = match &(*callback_info).notification {
         Notification::Created(app_handle)
         | Notification::Focused(app_handle)
         | Notification::Moved(app_handle)
@@ -343,15 +393,14 @@ unsafe extern "C" fn app_notification(
             // TODO: find which window(s) to send event to
             // TODO: for activated, test if we focus the app (using cmd+tab) and the app has no available windows,
             //       I think element will == application, otherwise the focused window??? test it
-            todo!()
+            // todo!()
+            return;
         }
         Notification::Destroyed(_) => (*callback_info).notification.info(None),
     };
 
     // It can only error if the sender is disconnected, and in that case, who cares.
-    let _ = (*callback_info)
-        .sender
-        .send(Ok(WindowEvent::with_timestamp(info, timestamp)));
+    let _ = (*callback_info).sender.send(Ok(event));
 }
 
 pub(super) fn raw_windows(inner: &AXUIElementRef) -> Result<CFArrayRef, WindowError> {

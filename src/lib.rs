@@ -1,7 +1,7 @@
 #![feature(mutex_unpoison)]
+#![feature(negative_impls)]
 
-use protocol::WindowEvent;
-pub use protocol::{Position, Size, Window, WindowError, WindowEventInfo, WindowId};
+pub use protocol::{Position, Size, Window, WindowError, WindowEvent, WindowId};
 
 mod protocol;
 mod sys;
@@ -11,6 +11,17 @@ mod sys;
 pub struct Watcher(sys::Watcher);
 
 impl Watcher {
+    /// Watches for all window events and passes them to the specified sender.
+    ///
+    /// To stop watching events, drop the returned [Watcher](Watcher).
+    ///
+    /// Note, this function will begin listening to new events. To access a list of
+    /// existing windows, call [`Watcher::iter_windows`](Watcher::iter_windows).
+    #[inline]
+    pub fn new() -> Result<Watcher, WindowError> {
+        Ok(Watcher(sys::Watcher::new()?))
+    }
+
     /// Returns an iterator over all existing windows.
     ///
     /// This function differs from [`iter_windows`](iter_windows) in that it iterates a
@@ -25,7 +36,7 @@ impl Watcher {
     /// Note, these events are not guaranteed to be precisely ordered. However, they do provide
     /// a timestamp that can be used for ordering. Consider buffering events if order is important.
     #[inline]
-    pub fn next_request(&self) -> Result<WindowEvent, WindowError> {
+    pub fn next_request(&mut self) -> Result<WindowEvent, WindowError> {
         self.0.next_request()
     }
 }
@@ -53,15 +64,4 @@ pub fn request_trust() -> Result<bool, WindowError> {
 #[inline]
 pub fn iter_windows() -> impl Iterator<Item = Result<Window, WindowError>> {
     sys::iter_windows().map(|result| result.map(Window))
-}
-
-/// Watches for all window events and passes them to the specified sender.
-///
-/// To stop watching events, drop the returned [Watcher](Watcher).
-///
-/// Note, this function will begin listening to new events. To access a list of
-/// existing windows, call [`Watcher::iter_windows`](Watcher::iter_windows).
-#[inline]
-pub fn watch() -> Result<Watcher, WindowError> {
-    Ok(Watcher(sys::watch()?))
 }
