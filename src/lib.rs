@@ -11,7 +11,7 @@ mod sys;
 pub struct Watcher(sys::Watcher);
 
 impl Watcher {
-    /// Watches for all window events and passes them to the specified sender.
+    /// Watches for all window events.
     ///
     /// To stop watching events, drop the returned [Watcher](Watcher).
     ///
@@ -20,15 +20,6 @@ impl Watcher {
     #[inline]
     pub fn new() -> Result<Watcher, WindowError> {
         Ok(Watcher(sys::Watcher::new()?))
-    }
-
-    /// Returns an iterator over all existing windows.
-    ///
-    /// This function differs from [`iter_windows`](iter_windows) in that it iterates a
-    /// cached set of updated windows, offering better efficiency.
-    #[inline]
-    pub fn iter_windows(&self) -> impl Iterator<Item = Result<Window, WindowError>> + '_ {
-        self.0.iter_windows().map(|result| result.map(Window))
     }
 
     /// Returns the next window event.
@@ -56,12 +47,13 @@ pub fn request_trust() -> Result<bool, WindowError> {
 }
 
 /// Returns an iterator over all existing windows.
-///
-/// This function differs from [`Watcher::iter_windows`](Watcher::iter_windows)
-/// in that it uses an ad-hoc approach to ask the operating system for a list of
-/// existing windows. Use [`Watcher::iter_windows`](Watcher::iter_windows)
-/// if you already have a handle to take advantage of caching.
 #[inline]
 pub fn iter_windows() -> impl Iterator<Item = Result<Window, WindowError>> {
     sys::iter_windows().map(|result| result.map(Window))
+}
+
+/// Returns the globally focused window if one exists.
+#[inline]
+pub fn focused_window() -> Result<Option<Window>, WindowError> {
+    sys::focused_window().map(|option| option.map(Window))
 }

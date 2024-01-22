@@ -4,9 +4,6 @@ use crate::{
 };
 
 /// Representation of a single window that can be queried and operated on.
-///
-/// Cloning a [Window](Window) is guaranteed to be cheap. At most, it is a
-/// single pointer copy. Note, this behaviour may change in the future.
 #[derive(Debug)]
 pub struct Window(pub(crate) sys::Window);
 

@@ -1,17 +1,10 @@
-use std::{
-    mem::MaybeUninit,
-    os::raw,
-    ptr,
-    sync::mpsc::Sender,
-    time::{Duration, Instant},
-};
+use std::{mem::MaybeUninit, os::raw, sync::mpsc::Sender, time::Duration};
 
 use crate::{
     protocol::{self, WindowError, WindowEvent},
     sys::platform::ffi::{
-        self, cfstring_to_string, kAXRaiseAction, kAXTitleAttribute, kAXWindowAttribute,
-        AXUIElementGetPid, AXUIElementIsAttributeSettable, AXUIElementPerformAction, Boolean,
-        CFArrayGetCount, CFArrayGetValueAtIndex, CFRetain,
+        cfstring_to_string, kAXFocusedWindowAttribute, AXUIElementGetPid, CFArrayGetCount,
+        CFArrayGetValueAtIndex, CFRetain,
     },
     WindowId,
 };
@@ -25,10 +18,10 @@ use super::{
         kAXWindowMiniaturizedNotification, kAXWindowsAttribute, kCFRunLoopDefaultMode, pid_t,
         AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
         AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, CFArrayRef,
-        CFRelease, CFRunLoopAddSource, CFRunLoopGetCurrent, CFStringRef, __AXObserver,
-        __AXUIElement, kAXApplicationActivatedNotification, kAXErrorNotificationUnsupported,
-        AXUIElementSetMessagingTimeout, _AXUIElementGetWindow, kAXErrorCannotComplete,
-        CFRunLoopGetMain, CFRunLoopRef, CGWindowID, __CFRunLoopSource,
+        CFRelease, CFRunLoopAddSource, CFStringRef, __AXObserver, __AXUIElement,
+        kAXApplicationActivatedNotification, kAXErrorNotificationUnsupported,
+        AXUIElementSetMessagingTimeout, _AXUIElementGetWindow, kAXErrorCannotComplete, CGWindowID,
+        __CFRunLoopSource,
     },
     window::{Window, _id},
 };
@@ -69,7 +62,8 @@ impl Application {
         self.pid
     }
 
-    pub fn windows(&self) -> Result<WindowIterator, WindowError> {
+    // TODO: return iterator not struct?
+    pub fn iter_windows(&self) -> Result<WindowIterator, WindowError> {
         let raw_windows = raw_windows(&self.inner)?;
         let len = unsafe { CFArrayGetCount(raw_windows) };
         Ok(WindowIterator {
@@ -296,12 +290,6 @@ impl Watcher {
             kAXErrorSuccess => {}
             // If the notification is unsupported, there's nothing we can do.
             kAXErrorNotificationUnsupported => {}
-            // TODO: this occurs when trying to subcribe to an unsubscriptable process (common case)
-            // as well as other obscure issues. yabai solves this by having a blacklist of known unsubscriptable
-            // processes.. doesn't seem too reliable. I wonder how often this error occurs?
-            // https://github.com/koekeishiya/yabai/issues/439
-            // https://github.com/koekeishiya/yabai/blob/60380a1f18ebaa503fda29a72647fd8f5f5ce43b/src/process_manager.c#L14-L61
-            // kAXErrorCannotComplete => {}
             _ => {
                 return Err(WindowError::from_ax_error(result));
             }
@@ -352,19 +340,16 @@ pub struct CallbackInfo {
     notification: Notification,
 }
 
-// TODO: try AXObserverCreateWithInfoCallback and iterate the info param to see if there's any useful info
-// TODO: also for some reaosn this isn't being called
 unsafe extern "C" fn app_notification(
     _observer: *mut __AXObserver,
     element: *const __AXUIElement,
     notification: CFStringRef,
     refcon: *mut raw::c_void,
 ) {
-    // TODO: temp
-    unsafe {
-        CFRetain(notification as *const _);
-    }
-    println!("{:?}", cfstring_to_string(notification));
+    // unsafe {
+    //     CFRetain(notification as *const _);
+    // }
+    // println!("{:?}", cfstring_to_string(notification));
 
     let callback_info = refcon as *mut CallbackInfo;
     let event = match &(*callback_info).notification {
@@ -387,13 +372,42 @@ unsafe extern "C" fn app_notification(
 
             (*callback_info).notification.info(Some(window))
         }
-        Notification::Shown(app_handle)
-        | Notification::Hidden(app_handle)
-        | Notification::Activated(app_handle) => {
-            // TODO: find which window(s) to send event to
-            // TODO: for activated, test if we focus the app (using cmd+tab) and the app has no available windows,
-            //       I think element will == application, otherwise the focused window??? test it
-            // todo!()
+        Notification::Activated(app_handle) => {
+            // TODO: lots of code dupe between above and from window module
+            let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
+            let result = unsafe {
+                AXUIElementCopyAttributeValue(
+                    app_handle.0,
+                    cfstring_from_str(kAXFocusedWindowAttribute),
+                    window.as_mut_ptr() as *mut _,
+                )
+            };
+            if result == kAXErrorSuccess {
+                let window_handle = AXUIElementRef(unsafe { window.assume_init() });
+                let window = match Window::new(window_handle, app_handle.clone()) {
+                    Ok(window) => window,
+                    Err(_) => return,
+                };
+                (*callback_info).notification.info(Some(window))
+            } else {
+                // This could occur when an application has no windows but is focused (using cmd+tab).
+                return;
+            }
+        }
+        Notification::Shown(app_handle) | Notification::Hidden(app_handle) => {
+            // TODO: we do a lot of error skipping here, reevaluate
+            let mut pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
+            let result = unsafe { AXUIElementGetPid(app_handle.0, pid.as_mut_ptr()) };
+            if result == kAXErrorSuccess {
+                let pid = unsafe { pid.assume_init() };
+                if let Ok(window_iter) = Application::new(pid).iter_windows() {
+                    for window in window_iter.into_iter().flatten() {
+                        let _ = (*callback_info)
+                            .sender
+                            .send(Ok((*callback_info).notification.info(Some(window))));
+                    }
+                }
+            }
             return;
         }
         Notification::Destroyed(_) => (*callback_info).notification.info(None),

@@ -7,7 +7,12 @@ license = "MIT"
 [workspace]
 members = [".", "crates/*"]
 
-[dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52.0", features = [
+  #
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
 icrate = { version = "0.1.0", features = [
   "AppKit",
   "AppKit_NSWorkspace",

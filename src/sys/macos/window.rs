@@ -21,8 +21,8 @@ use super::ffi::{
     AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
     AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
     CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, __AXUIElement,
-    kAXFocusedWindowAttribute, kAXValueTypeCGPoint, pid_t, AXUIElementGetPid,
-    CFArrayGetValueAtIndex, CGWindowID, NSRunningApplication_processIdentifier,
+    kAXFocusedWindowAttribute, kAXFrontmostAttribute, kAXValueTypeCGPoint, pid_t,
+    AXUIElementGetPid, CFArrayGetValueAtIndex, CGWindowID, NSRunningApplication_processIdentifier,
 };
 
 // TODO: I believe we can do CFEqual on the AXUIElementRef rather than id comparisons
@@ -172,31 +172,40 @@ impl Window {
     }
 
     pub fn focused(&self) -> Result<bool, WindowError> {
-        let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
+        // First check if the application is frontmost (AKA activated AKA application is focused).
+        let mut frontmost: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
                 self.app_handle.0,
-                cfstring_from_str(kAXFocusedWindowAttribute),
-                window.as_mut_ptr() as *mut _,
+                cfstring_from_str(kAXFrontmostAttribute),
+                frontmost.as_mut_ptr() as *mut _,
             )
         };
         if result == kAXErrorSuccess {
-            let window = AXUIElementRef(unsafe { window.assume_init() });
-            // This tells us that this window was the last focused window within the application's windows.
-            match _id(&window)? == self.id()? {
-                true => {
-                    // Next, get the pid for the focused application.
-                    match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
-                        Some(app) => {
-                            let focused_pid =
-                                unsafe { NSRunningApplication_processIdentifier(&app) };
-                            // If the focused app is this window's app, then success!
-                            Ok(self.pid()? == focused_pid)
-                        }
-                        None => Ok(false),
-                    }
+            let frontmost = unsafe {
+                let value = frontmost.assume_init();
+                let frontmost = CFBooleanGetValue(value as CFBooleanRef);
+                CFRelease(value);
+                frontmost
+            };
+            if frontmost != 0 {
+                let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
+                let result = unsafe {
+                    AXUIElementCopyAttributeValue(
+                        self.app_handle.0,
+                        cfstring_from_str(kAXFocusedWindowAttribute),
+                        window.as_mut_ptr() as *mut _,
+                    )
+                };
+                if result == kAXErrorSuccess {
+                    let window = AXUIElementRef(unsafe { window.assume_init() });
+                    // This tells us that this window was the last focused window within the application's windows.
+                    Ok(_id(&window)? == self.id()?)
+                } else {
+                    Err(WindowError::from_ax_error(result))
                 }
-                false => Ok(false),
+            } else {
+                Ok(false)
             }
         } else {
             Err(WindowError::from_ax_error(result))
@@ -204,7 +213,7 @@ impl Window {
     }
 
     pub fn fullscreened(&self) -> Result<bool, WindowError> {
-        let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::zeroed();
+        let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
                 self.read_inner()?.0,
@@ -226,7 +235,7 @@ impl Window {
     }
 
     pub fn minimized(&self) -> Result<bool, WindowError> {
-        let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::zeroed();
+        let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
                 self.read_inner()?.0,
@@ -287,6 +296,7 @@ impl Window {
     pub fn focus(&self) -> Result<(), WindowError> {
         self.bring_to_front()?;
 
+        // TODO: what about setting kAXFrontmostAttribute?
         unsafe {
             let app: Id<NSRunningApplication> = msg_send_id![
                 NSRunningApplication::class(),
@@ -380,10 +390,10 @@ impl Window {
     }
 
     fn pid(&self) -> Result<pid_t, WindowError> {
-        let mut self_pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
-        let result = unsafe { AXUIElementGetPid(self.app_handle.0, self_pid.as_mut_ptr()) };
+        let mut pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
+        let result = unsafe { AXUIElementGetPid(self.app_handle.0, pid.as_mut_ptr()) };
         if result == kAXErrorSuccess {
-            Ok(unsafe { self_pid.assume_init() })
+            Ok(unsafe { pid.assume_init() })
         } else {
             Err(WindowError::from_ax_error(result))
         }

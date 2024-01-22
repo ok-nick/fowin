@@ -7,8 +7,8 @@ fn main() -> Result<(), WindowError> {
         return Err(WindowError::NotTrusted);
     }
 
-    for window in fowin::iter_windows() {
-        let window = window?;
+    // Skip windows that aren't valid.
+    for window in fowin::iter_windows().flatten() {
         println!(
             "id: {:?}
 title: {:?}

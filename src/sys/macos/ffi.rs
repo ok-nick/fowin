@@ -33,6 +33,7 @@ pub const kAXErrorNoValue: i32 = -25212;
 pub const kAXErrorParameterizedAttributeUnsupported: i32 = -25213;
 pub const kAXErrorNotEnoughPrecision: i32 = -25214;
 
+pub const kAXFrontmostAttribute: &str = "AXFrontmost";
 pub const kAXDescriptionAttribute: &str = "AXDescription";
 pub const kAXEnabledAttribute: &str = "AXEnabled";
 pub const kAXFocusedUIElementAttribute: &str = "AXFocusedUIElement";

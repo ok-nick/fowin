@@ -14,7 +14,6 @@ fn main() -> Result<(), WindowError> {
             Ok(event) => {
                 let (name, kind) = match event {
                     WindowEvent::Opened(window) => (window.title(), "opened"),
-                    // TODO: cache title for window
                     WindowEvent::Closed(id) => (Ok(id.to_string()), "closed"),
                     WindowEvent::Hidden(window) => (window.title(), "hidden"),
                     WindowEvent::Shown(window) => (window.title(), "shown"),

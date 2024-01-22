@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     ffi::c_void,
     iter::{self, Once},
-    ops::Deref,
     ptr,
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, ThreadId},
@@ -12,27 +11,20 @@ use std::{
 
 use icrate::{
     objc2::{
-        declare_class, msg_send, msg_send_id, mutability,
-        rc::{Allocated, Id},
-        runtime::AnyObject,
-        ClassType, DeclaredClass,
+        declare_class, msg_send, msg_send_id, mutability, rc::Id, runtime::AnyObject, ClassType,
+        DeclaredClass,
     },
-    AppKit::{
-        NSApplication, NSApplicationActivationPolicyProhibited,
-        NSApplicationActivationPolicyRegular, NSRunningApplication, NSWorkspace,
-    },
+    AppKit::{NSApplicationActivationPolicyProhibited, NSRunningApplication, NSWorkspace},
     Foundation::{
-        ns_string, MainThreadMarker, NSArray, NSDate, NSDefaultRunLoopMode, NSDictionary,
-        NSKeyValueChangeKey, NSKeyValueChangeNewKey, NSKeyValueChangeOldKey,
-        NSKeyValueObservingOptionNew, NSKeyValueObservingOptionOld, NSObject, NSRunLoop, NSString,
+        ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
+        NSKeyValueChangeOldKey, NSKeyValueObservingOptionNew, NSKeyValueObservingOptionOld,
+        NSObject, NSString,
     },
 };
 
 use crate::{
     protocol::{WindowError, WindowEvent},
-    sys::platform::ffi::{
-        kCFRunLoopCommonModes, CFRunLoopGetCurrent, CFRunLoopSourceSignal, CFRunLoopWakeUp,
-    },
+    sys::platform::ffi::{CFRunLoopGetCurrent, CFRunLoopSourceSignal, CFRunLoopWakeUp},
 };
 
 pub use self::{application::Application, window::Window};
@@ -40,10 +32,9 @@ use self::{
     application::WindowIterator,
     ffi::{
         kAXTrustedCheckOptionPrompt, kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
-        kCFRunLoopRunFinished, pid_t, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
-        AXUIElementCreateSystemWide, AXUIElementSetMessagingTimeout, CFDictionaryCreate, CFRelease,
-        CFRetain, CFRunLoopAddSource, CFRunLoopRun, CFRunLoopRunInMode, CFRunLoopSourceContext,
-        CFRunLoopSourceCreate, CFRunLoopSourceRef, NSRunningApplication_processIdentifier,
+        pid_t, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, CFDictionaryCreate, CFRelease,
+        CFRunLoopAddSource, CFRunLoopRunInMode, CFRunLoopSourceContext, CFRunLoopSourceCreate,
+        CFRunLoopSourceRef, NSRunningApplication_processIdentifier,
     },
 };
 
@@ -58,8 +49,6 @@ const TIMEOUT_STEPS: u32 = 10;
 // interesting: https://github.com/nikitabobko/AeroSpace/blob/0569bb0d663ebf732c2ea12cc168d4ff60378394/src/util/accessibility.swift#L296
 
 // TODO: thread info: https://github.com/koekeishiya/yabai/issues/1583#issuecomment-1578557111
-
-// TODO: worth looking into, AXUIElementSetMessagingTimeout
 
 // TODO: use AXUIElementCopyAttributeNames to get a list of supported attributes for the window
 // and can use AXUIElementCopyAttributeValues to get multiple values at once
@@ -83,7 +72,6 @@ pub struct Watcher {
     sender: Sender<Result<WindowEvent, WindowError>>,
     receiver: Receiver<Result<WindowEvent, WindowError>>,
     watchers: HashMap<pid_t, WatcherState>,
-    // TODO: I believe can only run on main thread for the KVO to work
     thread_id: ThreadId,
 }
 
@@ -116,12 +104,6 @@ impl Watcher {
             watchers: HashMap::new(),
             thread_id: thread::current().id(),
         })
-    }
-
-    // Since app.windows() takes a ref to the app, we must extend the lifetime to self.
-    pub fn iter_windows(&self) -> impl Iterator<Item = Result<Window, WindowError>> + '_ {
-        //TODO: iter_windows_with_app_iter(self.apps.iter())
-        iter_windows_with_app_iter(iter_apps())
     }
 
     // TODO: same as below, but orders the output
@@ -208,7 +190,7 @@ impl Watcher {
 
                     // Read more on why we do this in `Application::should_wait`.
                     let start = Instant::now();
-                    while app.should_wait() && start.duration_since(Instant::now()) <= app.timeout()
+                    while app.should_wait() && Instant::now().duration_since(start) <= app.timeout()
                     {
                         thread::sleep(app.timeout() / TIMEOUT_STEPS);
                     }
@@ -286,9 +268,21 @@ pub fn request_trust() -> Result<bool, WindowError> {
     }
 }
 
-// TODO: returns the globally focused window
-pub fn focused_window() -> Result<Window, WindowError> {
-    todo!()
+pub fn focused_window() -> Result<Option<Window>, WindowError> {
+    match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
+        Some(app) => {
+            let focused_pid = unsafe { NSRunningApplication_processIdentifier(&app) };
+            for window in Application::new(focused_pid).iter_windows()? {
+                let window = window?;
+                if window.focused()? {
+                    return Ok(Some(window));
+                }
+            }
+
+            Ok(None)
+        }
+        None => Ok(None),
+    }
 }
 
 pub fn iter_windows() -> impl Iterator<Item = Result<Window, WindowError>> {
@@ -301,7 +295,7 @@ fn iter_windows_with_app_iter(
 ) -> impl Iterator<Item = Result<Window, WindowError>> {
     app_iter.flat_map(|app| {
         app.borrow()
-            .windows()
+            .iter_windows()
             .map(WindowIteratorOrErr::WindowIterator)
             .unwrap_or_else(|err| WindowIteratorOrErr::Err(iter::once(Err(err))))
     })
@@ -316,12 +310,12 @@ fn filter_apps(
     apps: impl Iterator<Item = Id<NSRunningApplication>>,
 ) -> impl Iterator<Item = Id<NSRunningApplication>> {
     apps
-        // TODO: we should be using the topmost filter, but some apps take a long time to connect
-        //       have to do more filtering, maybe if we are able to perform a quick check to see if an element is valid
+        // TODO: need to do more filtering, check out yabai, they have pretty extensive filtering
+        // https://github.com/koekeishiya/yabai/issues/439
+        // https://github.com/koekeishiya/yabai/blob/60380a1f18ebaa503fda29a72647fd8f5f5ce43b/src/process_manager.c#L14-L61
         .filter(|app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicyProhibited)
-        // .filter(|app| unsafe { app.activationPolicy() } == NSApplicationActivationPolicyRegular)
         .filter(|app| {
-            let pid = unsafe { NSRunningApplication_processIdentifier(&app) };
+            let pid = unsafe { NSRunningApplication_processIdentifier(app) };
             // if it's -1 then the app isn't associated with a process
             pid != -1
         })
@@ -469,34 +463,15 @@ impl AppWatcher {
 
 impl Drop for AppWatcher {
     fn drop(&mut self) {
-        // TODO: call removeObserver
+        unsafe {
+            let _: () = msg_send![
+                &NSWorkspace::sharedWorkspace(),
+                removeObserver: &*self.inner,
+                forKeyPath: ns_string!("runningApplications"),
+                context: &*self.context as *const _ as *const c_void
+            ];
+        }
     }
-}
-
-// #[test]
-pub fn app_watcher() {
-    let app_watcher = AppWatcher::new();
-
-    loop {
-        let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, f64::MAX, true as u8) };
-        // unsafe {
-        // NSRunLoop::currentRunLoop().run();
-        // .runMode_beforeDate(NSDefaultRunLoopMode, &NSDate::distantFuture());
-        // }
-        println!("{:?}", app_watcher.receiver.try_recv());
-
-        thread::sleep(Duration::from_secs(1));
-    }
-    // unsafe { MainThreadMarker::run_on_main(|mtm| NSApplication::sharedApplication(mtm).run()) }
-    // unsafe {
-    //     NSApplication::sharedApplication(MainThreadMarker::new().unwrap()).run();
-    // }
-    // unsafe {
-    //     println!(
-    //         "{}",
-    //         CFRunLoopRunInMode(kCFRunLoopDefaultMode, f64::MAX, false as u8),
-    //     );
-    // }
 }
 
 #[derive(Debug)]
