@@ -1,7 +1,7 @@
-#![feature(mutex_unpoison)]
 #![feature(negative_impls)]
+#![feature(lazy_cell)]
 
-pub use protocol::{Position, Size, Window, WindowError, WindowEvent, WindowId};
+pub use protocol::{Position, Size, Window, WindowError, WindowEvent, WindowHandle};
 
 mod protocol;
 mod sys;
@@ -9,6 +9,11 @@ mod sys;
 /// A handle that provides various methods for interacting with windows and window events.
 #[derive(Debug)]
 pub struct Watcher(sys::Watcher);
+
+// TODO: many backends (macos + windowws) must be called on the same thread is was created
+//       consider also doing runtime checks in the public API, ehhh??
+impl !Send for Watcher {}
+impl !Sync for Watcher {}
 
 impl Watcher {
     /// Watches for all window events.

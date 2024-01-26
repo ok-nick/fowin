@@ -14,7 +14,7 @@ fn main() -> Result<(), WindowError> {
             Ok(event) => {
                 let (name, kind) = match event {
                     WindowEvent::Opened(window) => (window.title(), "opened"),
-                    WindowEvent::Closed(id) => (Ok(id.to_string()), "closed"),
+                    WindowEvent::Closed(handle) => (Ok(format!("{:?}", handle)), "closed"),
                     WindowEvent::Hidden(window) => (window.title(), "hidden"),
                     WindowEvent::Shown(window) => (window.title(), "shown"),
                     WindowEvent::Focused(window) => (window.title(), "focused"),

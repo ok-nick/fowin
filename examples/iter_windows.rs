@@ -10,7 +10,7 @@ fn main() -> Result<(), WindowError> {
     // Skip windows that aren't valid.
     for window in fowin::iter_windows().flatten() {
         println!(
-            "id: {:?}
+            "handle: {:?}
 title: {:?}
 size: {:?}
 position: {:?}
@@ -18,7 +18,7 @@ fullscreened: {:?}
 minimized: {:?}
 focused: {:?}
 ",
-            window.id(),
+            window.handle(),
             window.title(),
             window.size(),
             window.position(),

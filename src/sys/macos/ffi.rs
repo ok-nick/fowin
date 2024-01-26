@@ -11,6 +11,7 @@
 
 use std::{
     ffi::{c_char, CStr, CString},
+    hash::Hash,
     mem,
 };
 
@@ -99,13 +100,23 @@ pub const kCFRunLoopRunFinished: SInt32 = 1;
 //       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
 //       https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L305
 #[repr(transparent)]
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct AXUIElementRef(pub *const __AXUIElement);
 impl AXUIElementRef {
     pub fn increment_ref_count(&self) {
         unsafe {
             CFRetain(self.0 as *const _);
         }
+    }
+}
+impl PartialEq for AXUIElementRef {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { CFEqual(self.0 as *const _, other.0 as *const _) == true as u8 }
+    }
+}
+impl Hash for AXUIElementRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(unsafe { CFHash(self.0 as *const _) });
     }
 }
 unsafe impl Sync for AXUIElementRef {}
@@ -539,6 +550,8 @@ extern "C" {
     );
 
     pub fn CFDictionaryGetCount(theDict: CFDictionaryRef) -> CFIndex;
+
+    pub fn CFHash(cf: CFTypeRef) -> CFHashCode;
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]

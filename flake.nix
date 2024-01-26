@@ -8,6 +8,7 @@
   outputs = {
     self,
     nixpkgs,
+    fenix,
   }: let
     # TODO: all systems
     system = "aarch64-darwin";

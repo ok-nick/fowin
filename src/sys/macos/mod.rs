@@ -32,9 +32,10 @@ use self::{
     application::WindowIterator,
     ffi::{
         kAXTrustedCheckOptionPrompt, kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
-        pid_t, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, CFDictionaryCreate, CFRelease,
-        CFRunLoopAddSource, CFRunLoopRunInMode, CFRunLoopSourceContext, CFRunLoopSourceCreate,
-        CFRunLoopSourceRef, NSRunningApplication_processIdentifier,
+        pid_t, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementRef,
+        CFDictionaryCreate, CFRelease, CFRunLoopAddSource, CFRunLoopRunInMode,
+        CFRunLoopSourceContext, CFRunLoopSourceCreate, CFRunLoopSourceRef, CGWindowID,
+        NSRunningApplication_processIdentifier,
     },
 };
 
@@ -43,6 +44,8 @@ mod ffi;
 mod window;
 
 const TIMEOUT_STEPS: u32 = 10;
+
+pub type WindowHandle = AXUIElementRef;
 
 // TODO: various properties of windows
 // https://github.com/nikitabobko/AeroSpace/blob/0569bb0d663ebf732c2ea12cc168d4ff60378394/src/util/accessibility.swift#L24

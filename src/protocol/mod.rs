@@ -1,11 +1,10 @@
 use std::{error::Error, fmt, time::Instant};
 
-pub use self::window::Window;
+pub use window::Window;
+
+use crate::sys;
 
 mod window;
-
-/// A unique identifier representing a window.
-pub type WindowId = u32;
 
 /// A posiiton with an x and y axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,9 +25,6 @@ pub struct Size {
 }
 
 // TODO: consider writing the protocol as traits so that they can be used w/ third party crates
-
-// generic interface over backend, provides functions like:
-// window resized, window moved, etc. is it possible to be generic over this for all platforms?
 
 // Keybinds:
 // https://github.com/Narsil/rdev
@@ -69,13 +65,22 @@ pub struct Size {
 // NOTE: komorebi doesn't listen to EVENT_OBJECT_CREATE because "some apps like firefox" don't send them
 // https://github.com/LGUG2Z/komorebi/blob/42ac13e0bd24c2775874cac891826024054e4e3c/komorebi/src/window_manager_event.rs#L127
 
+/// A handle representing a window.
+///
+/// This handle is only guaranteed to be unique whilst the underlying window is alive, they may be recycled. If you are caching windows and using their
+/// handle as an "identifier," then there are two things you should be sure to handle, no pun intended:
+/// * If a window is destroyed, consider the handle disposed and remove it from the cache
+/// * If a window is created, check equality on all recorded handles, if there is a match, then the handle was reused and the old handle should be disposed
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct WindowHandle(pub(crate) sys::WindowHandle);
+
 /// An event signifying a change in window properties.
 #[derive(Debug)]
 pub enum WindowEvent {
     /// The window was first opened.
     Opened(Window),
     /// The window was closed.
-    Closed(WindowId),
+    Closed(WindowHandle),
     /// The window was hidden.
     Hidden(Window),
     /// The window was shown.

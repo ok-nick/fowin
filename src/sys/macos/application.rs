@@ -4,9 +4,8 @@ use crate::{
     protocol::{self, WindowError, WindowEvent},
     sys::platform::ffi::{
         cfstring_to_string, kAXFocusedWindowAttribute, AXUIElementGetPid, CFArrayGetCount,
-        CFArrayGetValueAtIndex, CFRetain,
+        CFArrayGetValueAtIndex, CFHash, CFRetain,
     },
-    WindowId,
 };
 
 use super::{
@@ -23,7 +22,7 @@ use super::{
         AXUIElementSetMessagingTimeout, _AXUIElementGetWindow, kAXErrorCannotComplete, CGWindowID,
         __CFRunLoopSource,
     },
-    window::{Window, _id},
+    window::Window,
 };
 
 const DEFAULT_AX_TIMEOUT: Duration = Duration::from_secs(1);
@@ -198,18 +197,19 @@ impl Watcher {
                     let window_handle = AXUIElementRef(unsafe {
                         CFArrayGetValueAtIndex(raw_windows, i) as *const _
                     });
+                    let raw_handle = window_handle.0;
                     unsafe {
-                        AXUIElementSetMessagingTimeout(window_handle.0, app.timeout.as_secs_f32());
+                        AXUIElementSetMessagingTimeout(raw_handle, app.timeout.as_secs_f32());
                     }
                     let info = Box::into_raw(Box::new(CallbackInfo {
                         sender: sender.clone(),
-                        notification: Notification::Destroyed(_id(&window_handle)?),
+                        notification: Notification::Destroyed(window_handle),
                     }));
 
                     Watcher::add_notification(
                         kAXUIElementDestroyedNotification,
                         observer.0,
-                        window_handle.0,
+                        raw_handle,
                         info,
                     )?;
 
@@ -302,7 +302,7 @@ impl Watcher {
 #[derive(Debug)]
 pub enum Notification {
     Created(AXUIElementRef),
-    Destroyed(WindowId),
+    Destroyed(AXUIElementRef),
     Focused(AXUIElementRef),
     Activated(AXUIElementRef),
     Moved(AXUIElementRef),
@@ -320,7 +320,9 @@ impl Notification {
         let window = window.map(protocol::Window);
         match self {
             Notification::Created(_) => WindowEvent::Opened(window.unwrap()),
-            Notification::Destroyed(id) => WindowEvent::Closed(*id),
+            Notification::Destroyed(window_handle) => {
+                WindowEvent::Closed(protocol::WindowHandle(window_handle.clone()))
+            }
             Notification::Focused(_) => WindowEvent::Focused(window.unwrap()),
             Notification::Activated(_) => WindowEvent::Focused(window.unwrap()),
             Notification::Moved(_) => WindowEvent::Moved(window.unwrap()),
@@ -346,10 +348,10 @@ unsafe extern "C" fn app_notification(
     notification: CFStringRef,
     refcon: *mut raw::c_void,
 ) {
-    // unsafe {
-    //     CFRetain(notification as *const _);
-    // }
-    // println!("{:?}", cfstring_to_string(notification));
+    unsafe {
+        CFRetain(notification as *const _);
+    }
+    println!("{:?}", cfstring_to_string(notification));
 
     let callback_info = refcon as *mut CallbackInfo;
     let event = match &(*callback_info).notification {

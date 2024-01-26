@@ -1,19 +1,18 @@
 use crate::{
-    protocol::{Position, Size, WindowError, WindowId},
+    protocol::{Position, Size, WindowError, WindowHandle},
     sys,
 };
 
 /// Representation of a single window that can be queried and operated on.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window(pub(crate) sys::Window);
 
 impl Window {
-    /// A unique identifier associated with the window.
-    ///
-    /// This id is guaranteed to be unique.
+    // TODO: Is there a point to returning this struct? maybe we should have a platform-specific way to return a raw handle instead. The handle could be useful for hashing (e.g. key in hash map), but maybe it'd be better to just hash the window struct itself (need to impl Hash)?
+    /// A handle associated with the window.
     #[inline]
-    pub fn id(&self) -> Result<WindowId, WindowError> {
-        self.0.id()
+    pub fn handle(&self) -> WindowHandle {
+        WindowHandle(self.0.handle())
     }
 
     /// The title of the window.
@@ -56,12 +55,6 @@ impl Window {
     #[inline]
     pub fn visible(&self) -> Result<bool, WindowError> {
         self.0.visible()
-    }
-
-    /// Whether or not the window still exists.
-    #[inline]
-    pub fn exists(&self) -> Result<bool, WindowError> {
-        self.0.exists()
     }
 
     /// Change the size of the window.
