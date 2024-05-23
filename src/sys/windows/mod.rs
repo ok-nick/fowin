@@ -1,8 +1,8 @@
-use std::{ptr, sync::LazyLock};
+use std::{io, ptr, sync::LazyLock};
 
 use flume::{Receiver, Sender};
 use windows_sys::Win32::{
-    Foundation::{GetLastError, BOOL, HWND, LPARAM, TRUE},
+    Foundation::{BOOL, HANDLE, HWND, LPARAM, TRUE},
     UI::{
         Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
         WindowsAndMessaging::{
@@ -21,10 +21,6 @@ use crate::{protocol, WindowError, WindowEvent};
 pub use window::Window;
 
 mod window;
-
-// NOTE: https://github.com/LGUG2Z/komorebi/issues/151#issuecomment-1428027101
-//       use cloak instead of minimize, perhaps introduce a hide() function to windwos that uses the best suitable
-//       "hiding" method for the platform
 
 pub type WindowHandle = HWND;
 
@@ -54,7 +50,7 @@ impl Watcher {
                 SetWinEventHook(
                     EVENT_MIN,
                     EVENT_MAX,
-                    ptr::null::<isize>() as isize,
+                    ptr::null::<HANDLE>() as HANDLE,
                     Some(window_event),
                     0,
                     0,
@@ -90,15 +86,14 @@ pub fn request_trust() -> Result<bool, WindowError> {
 }
 
 pub fn iter_windows() -> impl Iterator<Item = Result<Window, WindowError>> {
-    // TODO: I can also do something w/ a sender here to get a more responsive iterator
+    // TODO: I can also do something w/ a sender here to get a more on-demand iterator
     let mut windows: Vec<HWND> = Vec::new();
     let result = unsafe { EnumWindows(Some(enum_windows), windows.as_mut_ptr() as LPARAM) };
     if result == TRUE {
         windows.into_iter().map(|window| Ok(Window::new(window)))
     } else {
-        let code = unsafe { GetLastError() };
-        // TODO: return iter::once Err w/ error code converted to windowerror
-        //       does EnumWindows even return false if the callback always returns true?
+        // TODO: need to either return iterator surrounded by error or return enum that impls Iterator
+        // iter::once(WindowError::last_os_error())
         todo!()
     }
 }
@@ -154,5 +149,11 @@ unsafe extern "system" fn window_event(
         };
 
         let _ = EVENT_SENDER.0.send(Ok(event));
+    }
+}
+
+impl WindowError {
+    pub(self) fn last_os_error() -> WindowError {
+        WindowError::OsError(io::Error::last_os_error())
     }
 }

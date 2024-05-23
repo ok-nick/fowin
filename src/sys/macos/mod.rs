@@ -9,17 +9,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use icrate::{
-    objc2::{
-        declare_class, msg_send, msg_send_id, mutability, rc::Id, runtime::AnyObject, ClassType,
-        DeclaredClass,
-    },
-    AppKit::{NSApplicationActivationPolicyProhibited, NSRunningApplication, NSWorkspace},
-    Foundation::{
-        ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
-        NSKeyValueChangeOldKey, NSKeyValueObservingOptionNew, NSKeyValueObservingOptionOld,
-        NSObject, NSString,
-    },
+use objc2::{
+    declare_class, msg_send, msg_send_id, mutability, rc::Id, runtime::AnyObject, ClassType,
+    DeclaredClass,
+};
+use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
+use objc2_foundation::{
+    ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
+    NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSString,
 };
 
 use crate::{
@@ -277,7 +274,7 @@ pub fn focused_window() -> Result<Option<Window>, WindowError> {
             let focused_pid = unsafe { NSRunningApplication_processIdentifier(&app) };
             for window in Application::new(focused_pid).iter_windows()? {
                 let window = window?;
-                if window.focused()? {
+                if window.is_focused()? {
                     return Ok(Some(window));
                 }
             }
@@ -316,8 +313,12 @@ fn filter_apps(
         // TODO: need to do more filtering, check out yabai, they have pretty extensive filtering
         // https://github.com/koekeishiya/yabai/issues/439
         // https://github.com/koekeishiya/yabai/blob/60380a1f18ebaa503fda29a72647fd8f5f5ce43b/src/process_manager.c#L14-L61
-        .filter(|app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicyProhibited)
+        // https://github.com/koekeishiya/yabai/commit/82727a2c22a9ed82e51223e554de39636e21061f#
+        .filter(
+            |app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicy::Prohibited,
+        )
         .filter(|app| {
+            // TODO: can get pid from app on main branch of objc2, waiting for release
             let pid = unsafe { NSRunningApplication_processIdentifier(app) };
             // if it's -1 then the app isn't associated with a process
             pid != -1
@@ -350,6 +351,7 @@ declare_class!(
     impl DeclaredClass for AppWatcherInner {}
 
     unsafe impl AppWatcherInner {
+        #[allow(non_snake_case)]
         #[method(observeValueForKeyPath:ofObject:change:context:)]
         unsafe fn observeValueForKeyPath_ofObject_change_context(
             &self,
@@ -445,7 +447,7 @@ impl AppWatcher {
                 &NSWorkspace::sharedWorkspace(),
                 addObserver: &*inner,
                 forKeyPath: ns_string!("runningApplications"),
-                options: NSKeyValueObservingOptionNew | NSKeyValueObservingOptionOld,
+                options: NSKeyValueObservingOptions::NSKeyValueObservingOptionNew.0 | NSKeyValueObservingOptions::NSKeyValueObservingOptionOld.0,
                 context: context as *const c_void
             ];
         }

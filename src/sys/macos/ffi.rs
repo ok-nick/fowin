@@ -15,8 +15,6 @@ use std::{
     mem,
 };
 
-use icrate::objc2::msg_send;
-
 pub const kAXErrorSuccess: i32 = 0;
 pub const kAXErrorFailure: i32 = -25200;
 pub const kAXErrorIllegalArgument: i32 = -25201;
@@ -632,9 +630,9 @@ extern "C" {
 }
 
 pub unsafe fn NSRunningApplication_processIdentifier(
-    app: &icrate::AppKit::NSRunningApplication,
+    app: &objc2_app_kit::NSRunningApplication,
 ) -> pid_t {
-    msg_send![app, processIdentifier]
+    objc2::msg_send![app, processIdentifier]
 }
 
 // TODO: need to CFRelease

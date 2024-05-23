@@ -21,13 +21,13 @@ impl Window {
         self.0.title()
     }
 
-    /// The size of the window.
+    /// The logical size of the window.
     #[inline]
     pub fn size(&self) -> Result<Size, WindowError> {
         self.0.size()
     }
 
-    /// The position of the window relative to the current display.
+    /// The logical position of the window relative to the current display.
     #[inline]
     pub fn position(&self) -> Result<Position, WindowError> {
         self.0.position()
@@ -35,26 +35,31 @@ impl Window {
 
     /// Whether or not the window is focused.
     #[inline]
-    pub fn focused(&self) -> Result<bool, WindowError> {
-        self.0.focused()
+    pub fn is_focused(&self) -> Result<bool, WindowError> {
+        self.0.is_focused()
     }
 
     /// Whether or not the window is fullscreened.
     #[inline]
-    pub fn fullscreened(&self) -> Result<bool, WindowError> {
-        self.0.fullscreened()
+    pub fn is_fullscreen(&self) -> Result<bool, WindowError> {
+        self.0.is_fullscreen()
     }
 
     /// Whether or not the window is minimized.
     #[inline]
-    pub fn minimized(&self) -> Result<bool, WindowError> {
-        self.0.minimized()
+    pub fn is_minimized(&self) -> Result<bool, WindowError> {
+        self.0.is_minimized()
     }
 
-    /// Whether or not the window is visible.
+    /// Whether or not the window is hidden.
+    ///
+    /// On macOS, this function checks if the window is minimized.
+    ///
+    /// On Windows, this function checks if the window is hidden or cloaked.
+    /// "Cloaking" a window is a fancy way of hiding it, [read more here](https://devblogs.microsoft.com/oldnewthing/20200302-00/?p=103507).
     #[inline]
-    pub fn visible(&self) -> Result<bool, WindowError> {
-        self.0.visible()
+    pub fn is_hidden(&self) -> Result<bool, WindowError> {
+        self.0.is_hidden()
     }
 
     /// Change the size of the window.
@@ -65,8 +70,8 @@ impl Window {
 
     /// Change the position of the window.
     #[inline]
-    pub fn translate(&self, position: Position) -> Result<(), WindowError> {
-        self.0.translate(position)
+    pub fn reposition(&self, position: Position) -> Result<(), WindowError> {
+        self.0.reposition(position)
     }
 
     /// Focus the window.
@@ -95,11 +100,27 @@ impl Window {
         self.0.maximize()
     }
 
+    /// Minimizes the window.
+    #[inline]
+    pub fn minimize(&self) -> Result<(), WindowError> {
+        self.0.minimize()
+    }
+
+    /// Unminimizes the window.
+    #[inline]
+    pub fn unminimize(&self) -> Result<(), WindowError> {
+        self.0.unminimize()
+    }
+
     /// Show the window.
     ///
-    /// On macOS, an application may be considered hidden, causing all of its windows to also
-    /// be hidden. This function will unhide the application then hide all of the other windows
-    /// to show the current window.
+    /// On macOS, this function will unminimize the window. However, if the application is hidden,
+    /// this function will unhide the application, then hide (minimize) all of the other windows.
+    /// Note that a hidden application means that all windows for that application are hidden from
+    /// view.
+    ///
+    /// On Windows, this function will cloak the window rather than hide it. Read [`Window::is_hidden`](Window::is_hidden)
+    /// for more information.
     #[inline]
     pub fn show(&self) -> Result<(), WindowError> {
         self.0.show()
@@ -107,7 +128,10 @@ impl Window {
 
     /// Hide the window.
     ///
-    /// On macOS, hiding a window does not remove it from the dock.
+    /// On macOS, the default behavior is to minimize the window.
+    ///
+    /// On Windows, this function will cloak the window rather than hide it. Read [`Window::is_hidden`](Window::is_hidden)
+    /// for more information.
     #[inline]
     pub fn hide(&self) -> Result<(), WindowError> {
         self.0.hide()
@@ -115,7 +139,7 @@ impl Window {
 
     /// Bring the window to the front.
     ///
-    /// However, this function does not focus the window.
+    /// This function does not focus the window.
     #[inline]
     pub fn bring_to_front(&self) -> Result<(), WindowError> {
         self.0.bring_to_front()

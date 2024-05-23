@@ -9,25 +9,28 @@ members = [".", "crates/*"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 flume = "0.11.0"
+windows-interface = "0.56.0"
 windows-sys = { version = "0.52.0", features = [
   "Win32",
   "Win32_UI",
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-icrate = { version = "0.1.0", features = [
-  "AppKit",
-  "AppKit_NSWorkspace",
-  "AppKit_NSRunningApplication",
-  "Foundation",
-  "Foundation_NSArray",
-  "Foundation_NSNotification",
-  "Foundation_NSNotificationCenter",
-  "Foundation_NSOperationQueue",
-  "Foundation_NSDictionary",
-  "Foundation_NSRunLoop",
-  "Foundation_NSDate",
+objc2 = "0.5.1"
+objc2-app-kit = { version = "0.2.0", features = [
+  "NSRunningApplication",
+  "NSWorkspace",
+] }
+objc2-foundation = { version = "0.2.0", features = [
+  "NSString",
+  "NSDictionary",
+  "NSKeyValueObserving",
+  "NSGeometry",
+  "NSEnumerator",
 ] }

@@ -22,9 +22,9 @@ focused: {:?}
             window.title(),
             window.size(),
             window.position(),
-            window.fullscreened(),
-            window.minimized(),
-            window.focused()
+            window.is_fullscreen(),
+            window.is_minimized(),
+            window.is_focused()
         );
     }
 

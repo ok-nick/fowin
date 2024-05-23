@@ -3,11 +3,9 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use icrate::{
-    objc2::{msg_send_id, rc::Id, ClassType},
-    AppKit::{NSApplicationActivateIgnoringOtherApps, NSRunningApplication, NSWorkspace},
-    Foundation::{CGPoint, CGSize},
-};
+use objc2::{msg_send_id, rc::Id, ClassType};
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+use objc2_foundation::{CGPoint, CGSize};
 
 use crate::{
     protocol::{Position, Size, WindowError},
@@ -147,7 +145,7 @@ impl Window {
         }
     }
 
-    pub fn focused(&self) -> Result<bool, WindowError> {
+    pub fn is_focused(&self) -> Result<bool, WindowError> {
         // First check if the application is frontmost (AKA activated AKA application is focused).
         let mut frontmost: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
@@ -188,7 +186,7 @@ impl Window {
         }
     }
 
-    pub fn fullscreened(&self) -> Result<bool, WindowError> {
+    pub fn is_fullscreen(&self) -> Result<bool, WindowError> {
         let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -210,7 +208,7 @@ impl Window {
         }
     }
 
-    pub fn minimized(&self) -> Result<bool, WindowError> {
+    pub fn is_minimized(&self) -> Result<bool, WindowError> {
         let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
@@ -232,11 +230,10 @@ impl Window {
         }
     }
 
-    pub fn visible(&self) -> Result<bool, WindowError> {
-        // TODO: returns if this window is visible, by means of app->hidden? and window->minimized
-        // also check if window size > 0?
-        // another thing to take into consideration is if the display is off or if it's on a visible (macos) space
-        todo!()
+    #[inline]
+    pub fn is_hidden(&self) -> Result<bool, WindowError> {
+        // Default behavior of Window::hide is to minimize, so check if minimized.
+        self.is_minimized()
     }
 
     pub fn resize(&self, size: Size) -> Result<(), WindowError> {
@@ -254,7 +251,7 @@ impl Window {
         }
     }
 
-    pub fn translate(&self, position: Position) -> Result<(), WindowError> {
+    pub fn reposition(&self, position: Position) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner.0,
@@ -280,7 +277,9 @@ impl Window {
             ];
             // TODO: supposedly this option is deprecated, but it does provide the behavior we want, TEST IT
             //       this method also returns a bool signifying if the app has quit or if it can be activated
-            app.activateWithOptions(NSApplicationActivateIgnoringOtherApps);
+            app.activateWithOptions(
+                NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps,
+            );
         }
         todo!()
     }
@@ -321,8 +320,15 @@ impl Window {
         todo!()
     }
 
-    // TODO: this is a WINDOW handling library, not an application handling
-    //       if the application is hidden, then show the application and hide other windows besides this one
+    pub fn minimize(&self) -> Result<(), WindowError> {
+        todo!()
+    }
+
+    pub fn unminimize(&self) -> Result<(), WindowError> {
+        todo!()
+    }
+
+    // TODO: if the application is hidden, then show the application and hide other windows besides this one
     pub fn show(&self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
@@ -339,7 +345,7 @@ impl Window {
     }
 
     pub fn hide(&self) -> Result<(), WindowError> {
-        // TODO: hide this window, minimizing is the best bet
+        // TODO: hide this window, minimizing is the best bet, can I set hidden attribute?
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner.0,

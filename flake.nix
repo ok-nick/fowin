@@ -8,7 +8,6 @@
   outputs = {
     self,
     nixpkgs,
-    fenix,
   }: let
     # TODO: all systems
     system = "aarch64-darwin";
@@ -18,10 +17,9 @@
   in {
     devShells.${system}.default = pkgs.mkShell {
       nativeBuildInputs = with pkgs;
-        [
-          libiconv # TODO: why is this required to compile fowin-test?
-        ]
+        []
         ++ (with darwin.apple_sdk.frameworks; [
+          libiconv
           CoreFoundation
           ApplicationServices
           AppKit

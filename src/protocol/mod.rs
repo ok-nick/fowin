@@ -1,10 +1,12 @@
-use std::{error::Error, fmt, time::Instant};
+use std::{error::Error, fmt, io, time::Instant};
 
 pub use window::Window;
 
 use crate::sys;
 
 mod window;
+
+// TODO: differentiate physical and logical pixels
 
 /// A posiiton with an x and y axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,7 +70,7 @@ pub struct Size {
 /// A handle representing a window.
 ///
 /// This handle is only guaranteed to be unique whilst the underlying window is alive, they may be recycled. If you are caching windows and using their
-/// handle as an "identifier," then there are two things you should be sure to handle, no pun intended:
+/// handle as an "identifier," then there are two things you should be sure to handle (no pun intended):
 /// * If a window is destroyed, consider the handle disposed and remove it from the cache
 /// * If a window is created, check equality on all recorded handles, if there is a match, then the handle was reused and the old handle should be disposed
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -120,7 +122,11 @@ pub enum WindowError {
     Unsupported,
     /// There was a random internal failure in the operating system.
     ArbitraryFailure,
+    // TODO: error type derived from windows where errors aren't predictable (maybe combine this w/ ArbitraryFailure)
+    ///
+    OsError(io::Error),
 }
+
 impl Error for WindowError {}
 
 impl fmt::Display for WindowError {
@@ -152,6 +158,9 @@ impl fmt::Display for WindowError {
             }
             WindowError::ArbitraryFailure => {
                 write!(f, "arbitrary failure returned by the operating system")
+            }
+            WindowError::OsError(_) => {
+                write!(f, "TODO")
             }
         }
     }

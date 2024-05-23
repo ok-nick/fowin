@@ -92,6 +92,7 @@ impl Application {
     pub(crate) fn should_wait(&self) -> bool {
         let mut _id: MaybeUninit<CGWindowID> = MaybeUninit::zeroed();
         unsafe {
+            // TODO: avoid using private API?
             _AXUIElementGetWindow(self.inner.0, _id.as_mut_ptr() as *mut _)
                 == kAXErrorCannotComplete
         }
