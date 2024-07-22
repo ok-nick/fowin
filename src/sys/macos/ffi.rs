@@ -386,6 +386,7 @@ pub type CFArrayEqualCallBack = ::std::option::Option<
 
 pub type CGWindowListOption = u32;
 
+#[repr(C)]
 pub struct CFArrayCallBacks {
     pub version: CFIndex,
     pub retain: CFArrayRetainCallBack,

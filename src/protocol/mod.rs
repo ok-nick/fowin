@@ -87,6 +87,10 @@ pub enum WindowEvent {
     Hidden(Window),
     /// The window was shown.
     Shown(Window),
+    /// The window was minimized.
+    Minimized(Window),
+    /// The window was unminimized.
+    Unminimized(Window),
     /// The window was focused.
     Focused(Window),
     /// The window was moved.

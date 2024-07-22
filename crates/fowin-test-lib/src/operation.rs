@@ -42,8 +42,8 @@ impl Operation {
 
     pub fn satisfied(&self, state: &State) -> bool {
         match self {
-            Operation::Resize => state.fullscreen && !state.hidden,
-            Operation::Move => state.fullscreen && !state.hidden,
+            Operation::Resize => !state.fullscreen && !state.hidden,
+            Operation::Move => !state.fullscreen && !state.hidden,
             _ => true,
         }
     }

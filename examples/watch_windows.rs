@@ -17,6 +17,8 @@ fn main() -> Result<(), WindowError> {
                     WindowEvent::Closed(handle) => (Ok(format!("{:?}", handle)), "closed"),
                     WindowEvent::Hidden(window) => (window.title(), "hidden"),
                     WindowEvent::Shown(window) => (window.title(), "shown"),
+                    WindowEvent::Minimized(window) => (window.title(), "minimized"),
+                    WindowEvent::Unminimized(window) => (window.title(), "unminimized"),
                     WindowEvent::Focused(window) => (window.title(), "focused"),
                     WindowEvent::Moved(window) => (window.title(), "moved"),
                     WindowEvent::Resized(window) => (window.title(), "resized"),

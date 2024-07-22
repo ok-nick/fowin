@@ -1,26 +1,44 @@
-use std::{collections::HashMap, io};
+use std::{
+    collections::HashMap,
+    env,
+    fs::{self, File},
+    io::{BufRead, BufReader, Write},
+};
 
-use fowin_test_lib::{Command, Mutation, State};
+use fowin_test_lib::{Action, Command, Mutation, State};
+use interprocess::local_socket::{
+    traits::Stream as StreamExt, GenericNamespaced, Stream, ToNsName,
+};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event_loop::EventLoop,
     window::{Fullscreen, Window, WindowBuilder},
 };
 
+// fs::write("/Users/nicky/Documents/repos/fowin/test.txt", id.as_bytes()).unwrap();
 fn main() {
-    let mut windows: HashMap<u32, Window> = HashMap::new();
+    let id = env::args().nth(1).unwrap();
+    let stream = Stream::connect(id.to_ns_name::<GenericNamespaced>().unwrap()).unwrap();
+
+    let mut json = serde_json::to_string::<Result<(), ()>>(&Ok(())).unwrap();
+    json.push('\n');
+
+    let mut reader = BufReader::new(stream);
+    reader.get_mut().write_all(&json.into_bytes()).unwrap();
+
+    let mut windows: HashMap<String, Window> = HashMap::new();
+    let mut buffer = String::new();
 
     // TODO: listen for events on event loop and report back when operation is completed
     let event_loop = EventLoop::new().unwrap();
     loop {
-        let mut input = String::new();
-
         // A new command is sent only when the last command has finished (reported a result).
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => {
-                let command: Command = serde_json::from_str(&input).unwrap();
-                match command {
-                    Command::Spawn { id } => {
+        match reader.read_line(&mut buffer) {
+            Ok(bytes) if bytes > 0 => {
+                println!("yerp {bytes} | {buffer}");
+                let command: Command = serde_json::from_str(&buffer).unwrap();
+                match command.action {
+                    Action::Spawn => {
                         let state = State::new();
                         let window = WindowBuilder::new()
                             .with_title(state.title)
@@ -43,10 +61,13 @@ fn main() {
                         window.set_minimized(state.hidden);
                         // TODO: at_front, focused
 
-                        windows.insert(id, window);
+                        windows.insert(command.id, window);
                     }
-                    Command::Mutate { id, mutation } => {
-                        let window = windows.get_mut(&id).unwrap();
+                    Action::Terminate => {
+                        todo!()
+                    }
+                    Action::Mutate(mutation) => {
+                        let window = windows.get_mut(&command.id).unwrap();
                         match mutation {
                             Mutation::Title(title) => window.set_title(&title),
                             Mutation::Size(size) => {
@@ -74,7 +95,10 @@ fn main() {
                     }
                 }
             }
+            Ok(_) => {}
             Err(_) => todo!(),
         }
+
+        buffer.clear();
     }
 }

@@ -1,126 +1,170 @@
-use rand::Rng;
+// use std::{collections::HashMap, thread, time::Duration};
 
-use crate::{
-    process::{Command, Process},
-    timeline::{ExecScope, Step, Timeline},
-};
+// use fowin::{Position, Size};
+// use rand::Rng;
+// use uuid::Uuid;
 
-#[derive(Debug)]
-pub struct Chronology {
-    // Since window ids are guaranteed to be sequential, we can store them in a vector.
-    window_to_process: Vec<usize>,
-    timeline: Timeline,
-}
+// use crate::{
+//     executor::Executor,
+//     timeline::{Action, ExecScope, Step, Timeline},
+//     Mutation,
+// };
 
-impl Chronology {
-    pub fn execute(&self) {
-        // TODO: inefficient, for now, I can definitely precompute this somewhere else
-        let num_processes = *self.window_to_process.iter().max().unwrap();
-        let mut processes = (0..num_processes)
-            .map(|_| Process::new())
-            .collect::<Result<Vec<Process>, ()>>()
-            .unwrap();
-        for (id, process_index) in self.window_to_process.iter().enumerate() {
-            processes[*process_index]
-                .execute(Command::Spawn { id: id as u32 })
-                .unwrap();
-        }
+// #[derive(Debug)]
+// pub struct Chronology {
+//     timeline: Timeline,
+//     // For now we store a map from local window id->global window id. This is so that we
+//     // can find the window globally via fowin. The reason we don't store the global id
+//     // directly in the timeline is because in the future, we should be finding windows
+//     // based on their process id + local window id.
+//     global_ids: HashMap<u32, String>,
+// }
 
-        for step in &self.timeline.steps {
-            // TODO: verify props for fowin here, before we begin as well
+// impl Chronology {
+//     pub fn execute<E: Executor>(&mut self, executor: &E) {
+//         println!("{:?}", self.timeline.steps);
+//         for step in &self.timeline.steps {
+//             thread::sleep(Duration::from_secs(1));
+//             println!("NEXT");
 
-            match step.details.scope {
-                // Use fowin locally... kinda contradictory huh?
-                ExecScope::Local => {
-                    todo!()
-                }
-                ExecScope::Foreign => {
-                    // TODO: unwraps
-                    let process = processes
-                        .get_mut(*self.window_to_process.get(step.id as usize).unwrap())
-                        .unwrap();
-                    process
-                        .execute(Command::Mutate {
-                            id: step.id,
-                            mutation: step.details.mutation.clone(),
-                        })
-                        .unwrap();
-                }
-            }
+//             // TODO: verify props for fowin here, before we begin as well
 
-            // TODO: verify props using fowin here
-        }
-    }
-}
+//             match step.details.scope {
+//                 // Use fowin locally... kinda contradictory huh.
+//                 ExecScope::Local => {
+//                     let id = self.global_ids.get(&step.id).unwrap();
+//                     let mut found = false;
+//                     for window in fowin::iter_windows().flatten() {
+//                         let title = window.title().unwrap();
+//                         println!("{title}");
+//                         if title == *id {
+//                             found = true;
+//                             match &step.details.action {
+//                                 Action::Spawn => {
+//                                     todo!()
+//                                 }
+//                                 Action::Terminate => {
+//                                     todo!()
+//                                 }
+//                                 Action::Mutate(mutation) => match mutation {
+//                                     Mutation::Size(size) => window
+//                                         .resize(Size {
+//                                             width: size.width,
+//                                             height: size.height,
+//                                         })
+//                                         .unwrap(),
+//                                     Mutation::Position(position) => window
+//                                         .reposition(Position {
+//                                             x: position.x,
+//                                             y: position.y,
+//                                         })
+//                                         .unwrap(),
+//                                     Mutation::Fullscreen(fullscreen) => match fullscreen {
+//                                         true => window.fullscreen().unwrap(),
+//                                         false => window.unfullscreen().unwrap(),
+//                                     },
+//                                     Mutation::Hidden(hidden) => match hidden {
+//                                         true => window.hide().unwrap(),
+//                                         false => window.show().unwrap(),
+//                                     },
+//                                     Mutation::AtFront(_) => todo!(),
+//                                     Mutation::Focused(_) => todo!(),
+//                                     _ => {
+//                                         // These properties aren't mutatable by fowin. They should also never be generated
+//                                         // in the first place because of timeline generation rules.
+//                                         // TODO: add unreachable? also make title ungeneratable locally
+//                                     }
+//                                 },
+//                             }
+//                         }
+//                     }
 
-#[derive(Debug)]
-pub struct ChronologyBuilder {
-    max_processes: u32,
-    max_windows: u32,
-    max_steps: u32,
-}
+//                     if !found {
+//                         // TODO: error w/ couldn't find window
+//                         panic!("couldn't find window")
+//                     }
+//                 }
+//                 ExecScope::Foreign => {
+//                     let id = self
+//                         .global_ids
+//                         .entry(step.id)
+//                         .or_insert_with(|| Uuid::new_v4().to_string());
 
-impl ChronologyBuilder {
-    pub fn new() -> ChronologyBuilder {
-        ChronologyBuilder {
-            max_processes: 1,
-            max_windows: 1,
-            max_steps: 1,
-        }
-    }
+//                     executor
+//                         .execute(Command {
+//                             id: id.clone(),
+//                             action: step.details.action.clone(),
+//                         })
+//                         .unwrap();
+//                 }
+//             }
 
-    pub fn max_processes(mut self, max: u32) -> Self {
-        self.max_processes = max;
-        self
-    }
+//             // TODO: verify props using fowin here
+//         }
+//     }
+// }
 
-    pub fn max_windows(mut self, max: u32) -> Self {
-        self.max_windows = max;
-        self
-    }
+// #[derive(Debug)]
+// pub struct ChronologyBuilder {
+//     max_processes: u32,
+//     max_windows: u32,
+//     max_steps: u32,
+// }
 
-    pub fn max_steps(mut self, max: u32) -> Self {
-        self.max_steps = max;
-        self
-    }
+// impl ChronologyBuilder {
+//     pub fn new() -> ChronologyBuilder {
+//         ChronologyBuilder {
+//             max_processes: 1,
+//             max_windows: 1,
+//             max_steps: 1,
+//         }
+//     }
 
-    pub fn build<R: Rng>(self, rng: &mut R) -> Chronology {
-        let num_processes = rng.gen_range(1..self.max_processes);
-        let mut timelines = Vec::with_capacity(num_processes as usize);
-        let mut window_to_process = Vec::new();
+//     pub fn max_processes(mut self, max: u32) -> Self {
+//         self.max_processes = max;
+//         self
+//     }
 
-        let mut id = 0;
-        for i in 0..num_processes {
-            let num_windows = rng.gen_range(1..self.max_windows);
-            let local_timelines = (0..num_windows)
-                .map(|_| {
-                    let num_steps = rng.gen_range(1..self.max_steps);
-                    let steps = Timeline::gen_details(num_steps as usize, rng)
-                        .into_iter()
-                        .map(|step| Step { id, details: step })
-                        .collect();
+//     pub fn max_windows(mut self, max: u32) -> Self {
+//         self.max_windows = max;
+//         self
+//     }
 
-                    window_to_process.push(i as usize);
-                    id += 1;
+//     pub fn max_steps(mut self, max: u32) -> Self {
+//         self.max_steps = max;
+//         self
+//     }
 
-                    Timeline::new(steps)
-                })
-                .collect::<Vec<Timeline>>();
+//     pub fn build<R: Rng>(self, rng: &mut R) -> Chronology {
+//         let num_processes = rng.gen_range(1..=self.max_processes);
+//         let mut timelines = Vec::with_capacity(num_processes as usize);
 
-            // TODO: tack on a create/destroy to the start/end of each timeline
-            let timeline = Timeline::overlap(&local_timelines, rng);
-            timelines.push(timeline);
-        }
+//         let mut id = 0;
+//         for i in 0..num_processes {
+//             let num_windows = rng.gen_range(1..=self.max_windows);
+//             let local_timelines = (0..num_windows)
+//                 .map(|_| {
+//                     let num_steps = rng.gen_range(1..=self.max_steps);
+//                     let steps = Timeline::gen_details(num_steps as usize, rng)
+//                         .into_iter()
+//                         .map(|step| Step { id, details: step })
+//                         .collect();
 
-        Chronology {
-            window_to_process,
-            timeline: Timeline::overlap(&timelines, rng),
-        }
-    }
-}
+//                     id += 1;
 
-impl Default for ChronologyBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+//                     Timeline::new(steps)
+//                 })
+//                 // TODO: assign windows within each timeline to a process id based on their index in the final vec
+//                 .collect::<Vec<Timeline>>();
+
+//             // TODO: tack on a create/destroy to the start/end of each timeline
+//             let timeline = Timeline::overlap(&local_timelines, rng);
+//             timelines.push(timeline);
+//         }
+
+//         Chronology {
+//             timeline: Timeline::overlap(&timelines, rng),
+//             global_ids: HashMap::new(),
+//         }
+//     }
+// }

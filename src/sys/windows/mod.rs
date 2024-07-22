@@ -133,12 +133,10 @@ unsafe extern "system" fn window_event(
         let event = match event {
             EVENT_OBJECT_CREATE => WindowEvent::Opened(window),
             EVENT_OBJECT_DESTROY => WindowEvent::Closed(protocol::WindowHandle(hwnd)),
-            EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED | EVENT_SYSTEM_MINIMIZESTART => {
-                WindowEvent::Hidden(window)
-            }
-            EVENT_OBJECT_SHOW | EVENT_OBJECT_UNCLOAKED | EVENT_SYSTEM_MINIMIZEEND => {
-                WindowEvent::Shown(window)
-            }
+            EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => WindowEvent::Hidden(window),
+            EVENT_OBJECT_SHOW | EVENT_OBJECT_UNCLOAKED => WindowEvent::Shown(window),
+            EVENT_SYSTEM_MINIMIZESTART => WindowEvent::Minimized(window),
+            EVENT_SYSTEM_MINIMIZEEND => WindowEvent::Unminimized(window),
             EVENT_OBJECT_FOCUS | EVENT_SYSTEM_FOREGROUND => WindowEvent::Focused(window),
             EVENT_SYSTEM_MOVESIZESTART | EVENT_SYSTEM_MOVESIZEEND => {
                 // TODO: is there really no way to differentiate resizing/positioning events without caching?

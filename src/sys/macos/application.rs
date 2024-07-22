@@ -331,8 +331,8 @@ impl Notification {
             Notification::Renamed(_) => WindowEvent::Renamed(window.unwrap()),
             Notification::Shown(_) => WindowEvent::Shown(window.unwrap()),
             Notification::Hidden(_) => WindowEvent::Hidden(window.unwrap()),
-            Notification::Miniaturized(_) => WindowEvent::Shown(window.unwrap()),
-            Notification::Deminiaturized(_) => WindowEvent::Hidden(window.unwrap()),
+            Notification::Miniaturized(_) => WindowEvent::Minimized(window.unwrap()),
+            Notification::Deminiaturized(_) => WindowEvent::Unminimized(window.unwrap()),
         }
     }
 }

@@ -8,3 +8,9 @@ fowin-test-lib = { path = "../fowin-test-lib" }
 winit = "0.29.9"
 serde = { version = "1.0.195", features = ["derive"] }
 serde_json = "1.0.111"
+interprocess = "2.1.0"
+
+[profile.release]
+# Since this crate is mainly used for testing, we want it to have optimizations
+# (hence, release), but also debug symbols if something goes wrong.
+debug = true

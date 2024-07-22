@@ -16,6 +16,7 @@ size: {:?}
 position: {:?}
 fullscreened: {:?}
 minimized: {:?}
+hidden: {:?}
 focused: {:?}
 ",
             window.handle(),
@@ -24,6 +25,7 @@ focused: {:?}
             window.position(),
             window.is_fullscreen(),
             window.is_minimized(),
+            window.is_hidden(),
             window.is_focused()
         );
     }

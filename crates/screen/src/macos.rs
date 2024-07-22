@@ -68,11 +68,6 @@ impl Screen {
         }
     }
 
-    fn mode(&self) -> CGDisplayModeRef {
-        // TODO: returns null if display is invalid, also must release via CGDisplayModeRelease
-        unsafe { CGDisplayCopyDisplayMode(self.inner) }
-    }
-
     pub fn logical_size(&self) -> LogicalSize {
         unsafe {
             LogicalSize {
@@ -97,6 +92,11 @@ impl Screen {
     // pub fn logical_position(&self) -> LogicalPosition {
     //     todo!()
     // }
+
+    fn mode(&self) -> CGDisplayModeRef {
+        // TODO: returns null if display is invalid, also must release via CGDisplayModeRelease
+        unsafe { CGDisplayCopyDisplayMode(self.inner) }
+    }
 }
 
 // TODO: also provide events for displays, such as power on/off, etc.

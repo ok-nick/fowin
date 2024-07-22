@@ -1,6 +1,7 @@
 [package]
 name = "fowin"
 version = "0.1.0"
+authors = ["ok-nick <nick.libraries@gmail.com>"]
 edition = "2021"
 license = "MIT"
 
