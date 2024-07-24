@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::HashMap,
     error::Error,
     fmt::{self, Debug},
@@ -20,85 +21,77 @@ use crate::{
     timeline::{Action, ExecScope, Step},
     Position, Size, State, Timeline,
 };
+pub use fowin_executor::FowinExecutor;
+#[cfg(feature = "winit")]
+pub use winit_executor::WinitExecutor;
+
+mod fowin_executor;
+#[cfg(feature = "winit")]
+mod winit_executor;
 
 pub trait Executor {
-    fn validate(&self, id: u32, state: &State) -> Result<(), ExecutionError>;
+    // Originally, this function validated the entire state, but it turns out we can't reliably guarantee
+    // window state won't be mutated by the OS. What we can guarantee is that the performed operaton (if
+    // no error) will, in fact, occur.
+    fn window_props(&self, id: u32) -> Result<impl WindowProps, ExecutionError>;
 
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError>;
-}
 
-#[derive(Debug)]
-pub struct FowinExecutor {
-    windows: HashMap<u32, Window>,
-}
-
-impl FowinExecutor {
-    pub fn new() -> Self {
-        Self {
-            windows: HashMap::new(),
-        }
-    }
-
-    pub fn execute_all<E: Executor>(
-        &mut self,
-        executor: &mut E,
-        timeline: Timeline,
-    ) -> Result<(), ExecutionError> {
-        let mut states = HashMap::new();
-        for step in timeline.into_steps() {
-            println!("SENT {:?}", step);
-
-            match step.scope {
-                ExecScope::Fowin => {
-                    self.execute(&step)?;
-                }
-                ExecScope::External => {
-                    executor.execute(&step)?;
+    fn validate(&self, id: u32, mutation: &Mutation) -> Result<(), ExecutionError> {
+        let window = self.window_props(id)?;
+        match mutation {
+            Mutation::Title(title) => {
+                let expected_title = window.title()?;
+                if title != &expected_title {
+                    Err(ValidationError::TitleMismatch {
+                        expected: expected_title,
+                        actually: title.to_owned(),
+                    })?;
                 }
             }
-
-            std::thread::sleep(Duration::from_secs(3));
-            println!("VALIDATING");
-
-            match step.action {
-                // If it's terminated, there's nothing to validate.
-                Action::Terminate => {}
-                Action::Spawn(mut state) => {
-                    self.cache_window(step.id, &state.title)?;
-
-                    state.title = encode_title(step.id, &state.title);
-                    states.insert(step.id, state);
-                }
-                Action::Mutate(mutation) => {
-                    let state = states.get_mut(&step.id).unwrap();
-                    state.apply(mutation.to_owned());
-
-                    self.validate(step.id, state)?;
-                    executor.validate(step.id, state)?;
+            Mutation::Size(size) => {
+                let expected_size = window.size()?;
+                if size != &expected_size {
+                    Err(ValidationError::SizeMismatch {
+                        expected: expected_size,
+                        actually: size.to_owned(),
+                    })?
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    fn cache_window(&mut self, id: u32, title: &str) -> Result<(), ExecutionError> {
-        if self.windows.contains_key(&id) {
-            return Ok(());
-        }
-
-        let title = encode_title(id, title);
-        for window in fowin::iter_windows() {
-            match window {
-                Ok(window) => {
-                    if window.title().unwrap() == title {
-                        self.windows.insert(id, window);
-                    }
+            Mutation::Position(position) => {
+                let expected_position = window.position()?;
+                if position != &expected_position {
+                    Err(ValidationError::PositionMismatch {
+                        expected: expected_position,
+                        actually: position.to_owned(),
+                    })?
                 }
-                Err(err) => {
-                    // TODO: need to fix the arbitraryerror stuff
-                    // println!("ERR: {:?}", err);
+            }
+            Mutation::Fullscreen(fullscreen) => {
+                let expected_fullscreen = window.is_fullscreen()?;
+                if fullscreen != &expected_fullscreen {
+                    Err(ValidationError::FullscreenMismatch {
+                        expected: expected_fullscreen,
+                        actually: fullscreen.to_owned(),
+                    })?
                 }
+            }
+            Mutation::Hidden(hidden) => {
+                let expected_hidden = window.is_hidden()?;
+                if hidden != &expected_hidden {
+                    Err(ValidationError::HiddenMismatch {
+                        expected: expected_hidden,
+                        actually: hidden.to_owned(),
+                    })?
+                }
+            }
+            Mutation::AtFront(_) => {
+                // TODO
+                todo!()
+            }
+            Mutation::Focused(_) => {
+                // TODO
+                todo!()
             }
         }
 
@@ -106,75 +99,20 @@ impl FowinExecutor {
     }
 }
 
-impl Executor for FowinExecutor {
-    // TODO: need to filter certain properties based on others, e.g. if minimized don't verify size/fullscreen, etc.
-    fn validate(&self, id: u32, state: &State) -> Result<(), ExecutionError> {
-        let window = self
-            .windows
-            .get(&id)
-            .ok_or(ExecutionError::UnknownWindowId(id))?;
+pub trait WindowProps {
+    fn title(&self) -> Result<String, ExecutionError>;
 
-        let actual_state = State {
-            title: window.title()?,
-            size: {
-                let size = window.size()?;
-                Size {
-                    width: size.width,
-                    // TODO: it's including the top bar, is this guaranteed to be 28?
-                    height: size.height - 28.0,
-                }
-            },
-            position: {
-                // TODO: need to fix
-                // let position = window.position()?;
-                // Position {
-                //     x: position.x,
-                //     y: position.y,
-                // }
-                Position { x: 0.0, y: 0.0 }
-            },
-            fullscreen: window.is_fullscreen()?,
-            hidden: window.is_minimized().unwrap(),
-            at_front: false, // TODO:
-            focused: false,  // TODO
-        };
+    fn size(&self) -> Result<Size, ExecutionError>;
 
-        actual_state.validate(state)?;
+    fn position(&self) -> Result<Position, ExecutionError>;
 
-        Ok(())
-    }
+    fn is_fullscreen(&self) -> Result<bool, ExecutionError>;
 
-    fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
-        match &step.action {
-            Action::Mutate(mutation) => {
-                let window = self.windows.get(&step.id).unwrap();
-                match mutation {
-                    Mutation::Title(_) => todo!(),
-                    Mutation::Size(_) => todo!(),
-                    Mutation::Position(_) => todo!(),
-                    Mutation::Fullscreen(_) => todo!(),
-                    // TODO: add minimize mutation
-                    Mutation::Hidden(hidden) => {
-                        match hidden {
-                            true => window.minimize().unwrap(),
-                            false => window.unminimize().unwrap(),
-                        }
+    fn is_hidden(&self) -> Result<bool, ExecutionError>;
 
-                        Ok(())
-                    }
-                    Mutation::AtFront(_) => todo!(),
-                    Mutation::Focused(_) => todo!(),
-                }
-            }
-            Action::Spawn(_) => Err(ExecutionError::UnsupportedOperation(
-                "fowin spawn window".to_owned(),
-            )),
-            // TODO: I believe this can be done on macos via kAXCloseButtonAttribute and kAXPressButton
-            Action::Terminate => Err(ExecutionError::UnsupportedOperation(
-                "fowin terminate window".to_owned(),
-            )),
-        }
-    }
+    fn is_at_front(&self) -> Result<bool, ExecutionError>;
+
+    fn is_focused(&self) -> Result<bool, ExecutionError>;
 }
 
 // The only way we can check if two unique windows are the same is by title comparison. Thus,

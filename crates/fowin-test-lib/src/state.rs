@@ -78,43 +78,55 @@ impl State {
         }
     }
 
-    pub fn validate(&self, expected: &State) -> Result<(), ValidationError> {
-        if self.title != expected.title {
-            return Err(ValidationError::TitleMismatch {
-                expected: expected.title.clone(),
-                actually: self.title.clone(),
-            });
+    pub fn validate(&self, expected: &State, mutation: &Mutation) -> Result<(), ValidationError> {
+        match mutation {
+            Mutation::Title(_) => {
+                if self.title != expected.title {
+                    return Err(ValidationError::TitleMismatch {
+                        expected: expected.title.clone(),
+                        actually: self.title.clone(),
+                    });
+                }
+            }
+            Mutation::Size(_) => {
+                if self.size != expected.size {
+                    return Err(ValidationError::SizeMismatch {
+                        expected: expected.size,
+                        actually: self.size,
+                    });
+                }
+            }
+            Mutation::Position(_) => {
+                if self.position != expected.position {
+                    return Err(ValidationError::PositionMismatch {
+                        expected: expected.position,
+                        actually: self.position,
+                    });
+                }
+            }
+            Mutation::Fullscreen(_) => {
+                if self.fullscreen != expected.fullscreen {
+                    return Err(ValidationError::FullscreenMismatch {
+                        expected: expected.fullscreen,
+                        actually: self.fullscreen,
+                    });
+                }
+            }
+            Mutation::Hidden(_) => {
+                if self.hidden != expected.hidden {
+                    return Err(ValidationError::HiddenMismatch {
+                        expected: expected.hidden,
+                        actually: self.hidden,
+                    });
+                }
+            }
+            Mutation::AtFront(_) => {
+                // TODO
+            }
+            Mutation::Focused(_) => {
+                // TODO
+            }
         }
-
-        if self.size != expected.size {
-            return Err(ValidationError::SizeMismatch {
-                expected: expected.size,
-                actually: self.size,
-            });
-        }
-
-        if self.position != expected.position {
-            return Err(ValidationError::PositionMismatch {
-                expected: expected.position,
-                actually: self.position,
-            });
-        }
-
-        if self.fullscreen != expected.fullscreen {
-            return Err(ValidationError::FullscreenMismatch {
-                expected: expected.fullscreen,
-                actually: self.fullscreen,
-            });
-        }
-
-        if self.hidden != expected.hidden {
-            return Err(ValidationError::HiddenMismatch {
-                expected: expected.hidden,
-                actually: self.hidden,
-            });
-        }
-
-        // TODO: at_front and focused
 
         Ok(())
     }

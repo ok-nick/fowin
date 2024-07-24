@@ -1,20 +1,22 @@
 use std::{
     collections::HashMap,
     sync::mpsc::{self, Receiver, Sender},
-    thread::{self, JoinHandle},
     time::Duration,
 };
 
-use fowin_test_lib::{
-    Action, ExecutionError, Executor, Mutation, Position, Size, State, Step, ValidationError,
-};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::StartCause,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
+    event_loop::{ActiveEventLoop, EventLoop},
     platform::pump_events::EventLoopExtPumpEvents,
     window::{Fullscreen, Window},
+};
+
+use crate::{
+    encode_title,
+    state::Mutation,
+    timeline::{Action, Step},
+    ExecutionError, Executor, Position, Size, WindowProps,
 };
 
 #[derive(Debug)]
@@ -46,41 +48,6 @@ impl WinitExecutor {
 }
 
 impl Executor for WinitExecutor {
-    fn validate(&self, id: u32, state: &State) -> Result<(), ExecutionError> {
-        let window = self
-            .app
-            .windows
-            .get(&id)
-            .ok_or(ExecutionError::UnknownWindowId(id))?;
-
-        let actual_state = State {
-            title: window.title(),
-            size: {
-                let size = window.inner_size();
-                Size {
-                    width: size.width.into(),
-                    height: size.height.into(),
-                }
-            },
-            position: {
-                let position = window.outer_position().unwrap();
-                Position {
-                    x: position.x.into(),
-                    y: position.y.into(),
-                }
-            },
-            // fullscreen: matches!(window.fullscreen().unwrap(), Fullscreen::Borderless(_)),
-            fullscreen: false, // TODO
-            hidden: window.is_minimized().unwrap(),
-            at_front: false, // TODO:
-            focused: false,  // TODO
-        };
-
-        actual_state.validate(state)?;
-
-        Ok(())
-    }
-
     // In a LocalExecutor, everything runs in the local program, so we don't need to map
     // window ids to separate processes as in the case of the BinaryExecutor.
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
@@ -95,14 +62,73 @@ impl Executor for WinitExecutor {
         self.receiver.recv().unwrap();
 
         // TODO: doesn't work properly without this. I wonder if it would be
-        //       better if we had a continuous run loop?
-        std::thread::sleep(Duration::from_millis(10));
+        //       better if we had a continuous run loop? What's a reliable number to wait?
+        //       maybe if a test fails we can rerun it with longer delay?
+        std::thread::sleep(Duration::from_millis(50));
 
         // Apply the new changes caused by the event.
         self.event_loop
             .pump_app_events(Some(Duration::ZERO), &mut self.app);
 
         Ok(())
+    }
+
+    fn window_props(&self, id: u32) -> Result<impl WindowProps, ExecutionError> {
+        self.app
+            .windows
+            .get(&id)
+            .ok_or(ExecutionError::UnknownWindowId(id))
+    }
+}
+
+impl WindowProps for &Window {
+    fn title(&self) -> Result<String, ExecutionError> {
+        Ok(Window::title(self))
+    }
+
+    // TODO: handle physical/logical size consistency
+    fn size(&self) -> Result<Size, ExecutionError> {
+        let size = self.outer_size();
+        Ok(Size {
+            width: size.width.into(),
+            height: size.height.into(),
+        })
+    }
+
+    fn position(&self) -> Result<Position, ExecutionError> {
+        let position = self.outer_position().map_err(|_| {
+            ExecutionError::UnsupportedOperation("winit window position".to_owned())
+        })?;
+        Ok(Position {
+            x: position.x.into(),
+            y: position.y.into(),
+        })
+    }
+
+    fn is_fullscreen(&self) -> Result<bool, ExecutionError> {
+        let fullscreen = self
+            .fullscreen()
+            .ok_or(ExecutionError::UnsupportedOperation(
+                "winit fullscreen".to_owned(),
+            ))?;
+        Ok(matches!(fullscreen, Fullscreen::Borderless(_)))
+    }
+
+    fn is_hidden(&self) -> Result<bool, ExecutionError> {
+        println!("{:?}", self.is_minimized());
+        self.is_minimized()
+            .ok_or(ExecutionError::UnsupportedOperation(
+                "winit is_minimized".to_owned(),
+            ))
+    }
+
+    fn is_at_front(&self) -> Result<bool, ExecutionError> {
+        // TODO
+        Ok(todo!())
+    }
+
+    fn is_focused(&self) -> Result<bool, ExecutionError> {
+        Ok(self.has_focus())
     }
 }
 
@@ -120,11 +146,10 @@ impl ApplicationHandler<Step> for App {
 
         match step.action {
             Action::Spawn(state) => {
-                // println!("{:?}", state);
                 let window = event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_title(fowin_test_lib::encode_title(step.id, &state.title))
+                            .with_title(encode_title(step.id, &state.title))
                             // TODO: use physical?
                             .with_inner_size(LogicalSize {
                                 width: state.size.width,
@@ -167,11 +192,10 @@ impl ApplicationHandler<Step> for App {
                         false => None,
                     }),
                     Mutation::Hidden(hidden) => window.set_minimized(hidden),
+                    // TODO: same as focus window?
                     Mutation::AtFront(at_front) => todo!(),
-                    Mutation::Focused(focused) => todo!(),
-                    // TODO: since we use the title to identify via id it for fowin, then maybe we should
-                    //       use a combination if id - title
-                    // Mutation::Title(title) => window.set_title(&title),
+                    Mutation::Focused(focused) => window.focus_window(),
+                    Mutation::Title(title) => window.set_title(&encode_title(step.id, &title)),
                     _ => {}
                 }
             }
@@ -189,83 +213,3 @@ impl ApplicationHandler<Step> for App {
     ) {
     }
 }
-
-// TODO: all it needs to be is a Result<(), E>, no need for separate enum
-// #[derive(Debug, Serialize, Deserialize)]
-// pub enum Response {
-//     Err(),
-// }
-
-// TODO: need some kind of IPC, preferably simple:
-// * iceoryx (extremely new and rather complex)
-// * ipc-channel (only recently maintained)
-// * interprocess (simple)
-// #[derive(Debug)]
-// pub struct BinaryExecutor {
-//     inner: Child,
-//     listener: Listener,
-//     ready: AtomicBool,
-// }
-
-// impl BinaryExecutor {
-//     pub fn new(mut spawner: process::Command) -> Result<BinaryExecutor, ()> {
-//         let id = Uuid::new_v4().to_string();
-//         let spawner = spawner.arg(&id);
-
-//         let listener = ListenerOptions::new()
-//             // TODO: check if GenericNamespaced::is_supported
-//             .name(id.to_ns_name::<GenericNamespaced>().unwrap())
-//             .create_sync()
-//             .unwrap();
-//         let process = spawner.spawn().unwrap();
-
-//         Ok(BinaryExecutor {
-//             inner: process,
-//             listener,
-//             ready: AtomicBool::new(false),
-//         })
-//     }
-
-//     fn wait_until_ready(&self) -> Result<(), ()> {
-//         if self.ready.load(Ordering::Relaxed) {
-//             Ok(())
-//         } else {
-//             let stream = self.listener.accept().unwrap();
-//             let mut reader = BufReader::new(stream);
-
-//             let mut json = String::new();
-//             reader.read_line(&mut json).unwrap();
-
-//             // TODO: output should be result
-//             match serde_json::from_str::<Result<(), ()>>(&json).unwrap() {
-//                 Ok(_) => {
-//                     self.ready.store(true, Ordering::Relaxed);
-//                     Ok(())
-//                 }
-//                 Err(err) => Err(err),
-//             }
-//         }
-//     }
-// }
-
-// impl Executor for BinaryExecutor {
-//     //  TODO: unwraps
-//     fn execute(&self, command: Command) -> Result<(), ()> {
-//         self.wait_until_ready().unwrap();
-
-//         let stream = self.listener.accept().unwrap();
-//         let mut reader = BufReader::new(stream);
-
-//         let mut json = serde_json::to_string(&command).unwrap();
-//         json.push('\n');
-//         println!("WRITING {json}");
-//         reader.get_mut().write_all(&json.into_bytes()).unwrap();
-
-//         // TODO: read until timeout?
-//         let mut json = String::new();
-//         reader.read_line(&mut json).unwrap();
-
-//         // TODO: output response should be a result
-//         serde_json::from_str(&json).unwrap()
-//     }
-// }
