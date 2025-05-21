@@ -39,6 +39,7 @@ pub const kAXFocusedUIElementAttribute: &str = "AXFocusedUIElement";
 pub const kAXWindowAttribute: &str = "AXWindow";
 pub const kAXWindowsAttribute: &str = "AXWindows";
 pub const kAXMinimizedAttribute: &str = "AXMinimized";
+pub const kAXIdentifierAttribute: &str = "AXIdentifier";
 pub const kAXSizeAttribute: &str = "AXSize";
 pub const kAXPositionAttribute: &str = "AXPosition";
 pub const kAXTitleAttribute: &str = "AXTitle";

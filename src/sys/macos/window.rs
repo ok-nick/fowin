@@ -72,6 +72,10 @@ impl Window {
         }
     }
 
+    // TODO: this returns the window size + title bar size.
+    //       should we return this? return only the content size?
+    //       make resize() include the title bar size? or just
+    //       document it?
     pub fn size(&self) -> Result<Size, WindowError> {
         let mut size: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
@@ -186,6 +190,7 @@ impl Window {
         }
     }
 
+    // TODO: when fullscreening then unfullscreening a window it still returns true
     pub fn is_fullscreen(&self) -> Result<bool, WindowError> {
         let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
@@ -209,22 +214,22 @@ impl Window {
     }
 
     pub fn is_minimized(&self) -> Result<bool, WindowError> {
-        let mut hidden: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
+        let mut minimized: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
         let result = unsafe {
             AXUIElementCopyAttributeValue(
                 self.inner.0,
                 cfstring_from_str(kAXMinimizedAttribute),
-                hidden.as_mut_ptr() as *mut _,
+                minimized.as_mut_ptr() as *mut _,
             )
         };
         if result == kAXErrorSuccess {
-            let hidden = unsafe {
-                let value = hidden.assume_init();
-                let hidden = CFBooleanGetValue(value as CFBooleanRef);
+            let minimized = unsafe {
+                let value = minimized.assume_init();
+                let minimized = CFBooleanGetValue(value as CFBooleanRef);
                 CFRelease(value);
-                hidden
+                minimized
             };
-            Ok(hidden != 0)
+            Ok(minimized != 0)
         } else {
             Err(WindowError::from_ax_error(result))
         }
@@ -236,6 +241,7 @@ impl Window {
         self.is_minimized()
     }
 
+    // TODO: this sets the inner window size (excluding title bar)
     pub fn resize(&self, size: Size) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
@@ -321,15 +327,21 @@ impl Window {
     }
 
     pub fn minimize(&self) -> Result<(), WindowError> {
-        todo!()
+        let result = unsafe {
+            AXUIElementSetAttributeValue(
+                self.inner.0,
+                cfstring_from_str(kAXMinimizedAttribute),
+                &kCFBooleanTrue as *const _ as *const _,
+            )
+        };
+        if result == kAXErrorSuccess {
+            Ok(())
+        } else {
+            Err(WindowError::from_ax_error(result))
+        }
     }
 
     pub fn unminimize(&self) -> Result<(), WindowError> {
-        todo!()
-    }
-
-    // TODO: if the application is hidden, then show the application and hide other windows besides this one
-    pub fn show(&self) -> Result<(), WindowError> {
         let result = unsafe {
             AXUIElementSetAttributeValue(
                 self.inner.0,
@@ -344,20 +356,14 @@ impl Window {
         }
     }
 
+    // TODO: if the application is hidden, then show the application and hide other windows besides this one
+    pub fn show(&self) -> Result<(), WindowError> {
+        self.unminimize()
+    }
+
+    // TODO: hide this window, minimizing is the best bet, can I set hidden attribute?
     pub fn hide(&self) -> Result<(), WindowError> {
-        // TODO: hide this window, minimizing is the best bet, can I set hidden attribute?
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXMinimizedAttribute),
-                &kCFBooleanTrue as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        self.minimize()
     }
 
     pub fn bring_to_front(&self) -> Result<(), WindowError> {

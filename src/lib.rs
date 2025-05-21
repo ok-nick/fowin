@@ -10,7 +10,7 @@ mod sys;
 #[derive(Debug)]
 pub struct Watcher(sys::Watcher);
 
-// TODO: many backends (macos + windowws) must be called on the same thread is was created
+// TODO: many backends (macos + windowws) must be called on the same thread it was created
 //       consider also doing runtime checks in the public API, ehhh??
 impl !Send for Watcher {}
 impl !Sync for Watcher {}

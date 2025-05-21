@@ -314,9 +314,10 @@ fn filter_apps(
         // https://github.com/koekeishiya/yabai/issues/439
         // https://github.com/koekeishiya/yabai/blob/60380a1f18ebaa503fda29a72647fd8f5f5ce43b/src/process_manager.c#L14-L61
         // https://github.com/koekeishiya/yabai/commit/82727a2c22a9ed82e51223e554de39636e21061f#
-        .filter(
-            |app| unsafe { app.activationPolicy() } != NSApplicationActivationPolicy::Prohibited,
-        )
+        //
+        // NOTE: ideally we'd include ::Accessory activation policy apps, but most (if not all) of them are irrelevant
+        //       and cause significant slow downs
+        .filter(|app| unsafe { app.activationPolicy() } == NSApplicationActivationPolicy::Regular)
         .filter(|app| {
             // TODO: can get pid from app on main branch of objc2, waiting for release
             let pid = unsafe { NSRunningApplication_processIdentifier(app) };
