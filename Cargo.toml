@@ -35,3 +35,12 @@ objc2-foundation = { version = "0.2.0", features = [
   "NSGeometry",
   "NSEnumerator",
 ] }
+
+[dev-dependencies]
+fowin-test-lib = { path = "crates/fowin-test-lib" }
+libtest-mimic-collect = "0.3.2"
+
+[[test]]
+name = "operation"
+path = "tests/operation.rs"
+harness = false

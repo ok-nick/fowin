@@ -1,10 +1,4 @@
-use rand::{
-    distributions::{Alphanumeric, Standard},
-    prelude::Distribution,
-    Rng,
-};
-
-use crate::state::{Mutation, State};
+use crate::state::State;
 
 #[derive(Debug)]
 pub enum Scope {
@@ -48,23 +42,6 @@ impl Operation {
         }
     }
 
-    pub fn mutation<R: Rng>(&self, rng: &mut R) -> Mutation {
-        match self {
-            Operation::Resize => Mutation::Size(rng.gen()),
-            Operation::Move => Mutation::Position(rng.gen()),
-            Operation::Fullscreen => Mutation::Fullscreen(true),
-            Operation::Unfullscreen => Mutation::Fullscreen(false),
-            Operation::Show => Mutation::Hidden(false),
-            Operation::Hide => Mutation::Hidden(true),
-            Operation::BringToFront => Mutation::AtFront(true),
-            Operation::Focus => Mutation::Focused(true),
-            Operation::Rename => Mutation::Title(
-                // TODO: define str length somewhere
-                String::from_utf8(rng.sample_iter(&Alphanumeric).take(16).collect()).unwrap(),
-            ),
-        }
-    }
-
     pub const fn scope(&self) -> Scope {
         match self {
             Operation::Resize => Scope::Global,
@@ -76,22 +53,6 @@ impl Operation {
             Operation::BringToFront => Scope::Global,
             Operation::Focus => Scope::Global,
             Operation::Rename => Scope::Local,
-        }
-    }
-}
-
-impl Distribution<Operation> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Operation {
-        match rng.gen_range(0..=8) {
-            0 => Operation::Resize,
-            1 => Operation::Move,
-            2 => Operation::Fullscreen,
-            3 => Operation::Unfullscreen,
-            4 => Operation::Show,
-            5 => Operation::Hide,
-            6 => Operation::BringToFront,
-            7 => Operation::Focus,
-            _ => Operation::Rename,
         }
     }
 }

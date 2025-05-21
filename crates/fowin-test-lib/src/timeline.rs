@@ -1,12 +1,6 @@
-use std::collections::HashMap;
-
-use rand::{distributions::Standard, prelude::Distribution, seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    operation::{Operation, Scope},
-    state::{Mutation, State},
-};
+use crate::state::{Mutation, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
@@ -25,10 +19,10 @@ impl Step {
         }
     }
 
-    pub fn external(id: u32, action: Action) -> Self {
+    pub fn external<T: Into<Action>>(id: u32, action: T) -> Self {
         Self {
             id,
-            action,
+            action: action.into(),
             scope: ExecScope::External,
         }
     }
@@ -42,20 +36,17 @@ pub enum ExecScope {
     External,
 }
 
-impl Distribution<ExecScope> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ExecScope {
-        match rng.gen_range(0..=1) {
-            0 => ExecScope::Fowin,
-            _ => ExecScope::External,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
     Mutate(Mutation),
     Spawn(State),
     Terminate,
+}
+
+impl From<Mutation> for Action {
+    fn from(mutation: Mutation) -> Self {
+        Action::Mutate(mutation)
+    }
 }
 
 #[derive(Debug, Clone)]

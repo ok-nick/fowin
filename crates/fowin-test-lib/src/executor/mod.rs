@@ -1,32 +1,21 @@
 use std::{
-    borrow::Borrow,
-    collections::HashMap,
     error::Error,
     fmt::{self, Debug},
-    io::{BufRead, BufReader, Read, Write},
-    process::{self, Child},
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
 };
 
-use fowin::{Window, WindowError};
-use interprocess::local_socket::{
-    traits::Listener as ListenerExt, GenericNamespaced, Listener, ListenerOptions, ToNsName,
-};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use fowin::WindowError;
 
-use crate::{
-    state::Mutation,
-    timeline::{Action, ExecScope, Step},
-    Position, Size, State, Timeline,
-};
+use crate::{state::Mutation, timeline::Step, Position, Size};
+#[cfg(feature = "binary_executor")]
+pub use binary_executor::{BinaryExecutor, IpcError, Request, RequestProp, Response};
 pub use fowin_executor::FowinExecutor;
-#[cfg(feature = "winit")]
+#[cfg(feature = "winit_executor")]
 pub use winit_executor::WinitExecutor;
 
+#[cfg(feature = "binary_executor")]
+mod binary_executor;
 mod fowin_executor;
-#[cfg(feature = "winit")]
+#[cfg(feature = "winit_executor")]
 mod winit_executor;
 
 pub trait Executor {
@@ -41,55 +30,64 @@ pub trait Executor {
         let window = self.window_props(id)?;
         match mutation {
             Mutation::Title(title) => {
-                let expected_title = window.title()?;
-                if title != &expected_title {
+                let actual_title = window.title()?;
+                if title != &actual_title {
                     Err(ValidationError::TitleMismatch {
-                        expected: expected_title,
-                        actually: title.to_owned(),
+                        expected: title.to_owned(),
+                        actually: actual_title,
                     })?;
                 }
             }
             Mutation::Size(size) => {
-                let expected_size = window.size()?;
-                if size != &expected_size {
+                let actual_size = window.size()?;
+                if size != &actual_size {
                     Err(ValidationError::SizeMismatch {
-                        expected: expected_size,
-                        actually: size.to_owned(),
+                        expected: size.to_owned(),
+                        actually: actual_size,
                     })?
                 }
             }
             Mutation::Position(position) => {
-                let expected_position = window.position()?;
-                if position != &expected_position {
+                let actual_position = window.position()?;
+                if position != &actual_position {
                     Err(ValidationError::PositionMismatch {
-                        expected: expected_position,
-                        actually: position.to_owned(),
+                        expected: position.to_owned(),
+                        actually: actual_position,
                     })?
                 }
             }
             Mutation::Fullscreen(fullscreen) => {
-                let expected_fullscreen = window.is_fullscreen()?;
-                if fullscreen != &expected_fullscreen {
+                let actual_fullscreen = window.is_fullscreen()?;
+                if fullscreen != &actual_fullscreen {
                     Err(ValidationError::FullscreenMismatch {
-                        expected: expected_fullscreen,
-                        actually: fullscreen.to_owned(),
+                        expected: fullscreen.to_owned(),
+                        actually: actual_fullscreen,
                     })?
                 }
             }
-            Mutation::Hidden(hidden) => {
-                let expected_hidden = window.is_hidden()?;
-                if hidden != &expected_hidden {
+            Mutation::Hide(hidden) => {
+                let actual_hidden = window.is_hidden()?;
+                if hidden != &actual_hidden {
                     Err(ValidationError::HiddenMismatch {
-                        expected: expected_hidden,
-                        actually: hidden.to_owned(),
+                        expected: hidden.to_owned(),
+                        actually: actual_hidden,
                     })?
                 }
             }
-            Mutation::AtFront(_) => {
+            Mutation::Minimize(minimized) => {
+                let actual_minimized = window.is_hidden()?;
+                if minimized != &actual_minimized {
+                    Err(ValidationError::HiddenMismatch {
+                        expected: minimized.to_owned(),
+                        actually: actual_minimized,
+                    })?
+                }
+            }
+            Mutation::BringToFront => {
                 // TODO
                 todo!()
             }
-            Mutation::Focused(_) => {
+            Mutation::Focus => {
                 // TODO
                 todo!()
             }
@@ -110,15 +108,21 @@ pub trait WindowProps {
 
     fn is_hidden(&self) -> Result<bool, ExecutionError>;
 
+    fn is_minimized(&self) -> Result<bool, ExecutionError>;
+
     fn is_at_front(&self) -> Result<bool, ExecutionError>;
 
     fn is_focused(&self) -> Result<bool, ExecutionError>;
 }
 
+// TODO: maybe in the future we can use window properties
 // The only way we can check if two unique windows are the same is by title comparison. Thus,
 // we use a custom title format that combines the unique ID w/ the actual (mutated) title.
-pub fn encode_title(id: u32, title: &str) -> String {
-    format!("{id}: {title}")
+pub fn encode_title(namespace: &Option<String>, id: u32, title: &str) -> String {
+    match namespace {
+        Some(namespace) => format!("{namespace}-{id}: {title}"),
+        None => format!("{id}: {title}"),
+    }
 }
 
 #[derive(Debug)]
@@ -127,6 +131,8 @@ pub enum ExecutionError {
     UnsupportedOperation(String),
     Validation(ValidationError),
     Fowin(fowin::WindowError),
+    #[cfg(feature = "binary_executor")]
+    Ipc(IpcError),
 }
 
 impl Error for ExecutionError {}
@@ -146,6 +152,8 @@ impl fmt::Display for ExecutionError {
             }
             ExecutionError::Validation(validation_error) => fmt::Display::fmt(validation_error, f),
             ExecutionError::Fowin(window_err) => fmt::Display::fmt(window_err, f),
+            #[cfg(feature = "binary_executor")]
+            ExecutionError::Ipc(err) => write!(f, "{}", err),
         }
     }
 }
@@ -181,6 +189,10 @@ pub enum ValidationError {
         actually: bool,
     },
     HiddenMismatch {
+        expected: bool,
+        actually: bool,
+    },
+    MinimizedMismatch {
         expected: bool,
         actually: bool,
     },
@@ -228,6 +240,13 @@ impl fmt::Display for ValidationError {
                 )
             }
             ValidationError::HiddenMismatch { expected, actually } => {
+                write!(
+                    f,
+                    "mismatched minimized, expected `{}`, got `{}`",
+                    expected, actually
+                )
+            }
+            ValidationError::MinimizedMismatch { expected, actually } => {
                 write!(
                     f,
                     "mismatched hidden, expected `{}`, got `{}`",

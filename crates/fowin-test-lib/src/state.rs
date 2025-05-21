@@ -1,7 +1,6 @@
-use rand::{distributions::Standard, prelude::Distribution, Rng};
 use serde::{Deserialize, Serialize};
 
-use crate::ValidationError;
+use crate::executor::ValidationError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
@@ -9,30 +8,10 @@ pub struct Position {
     pub y: f64,
 }
 
-impl Distribution<Position> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Position {
-        // TODO: size must be within monitor size bounds
-        Position {
-            x: rng.gen(),
-            y: rng.gen(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Size {
     pub width: f64,
     pub height: f64,
-}
-
-impl Distribution<Size> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Size {
-        // TODO: size must be within monitor size bounds
-        Size {
-            width: rng.gen(),
-            height: rng.gen(),
-        }
-    }
 }
 
 // TODO: can impl this without a hashmap
@@ -43,6 +22,7 @@ pub struct State {
     pub position: Position,
     pub fullscreen: bool,
     pub hidden: bool,
+    pub minimized: bool,
     // TODO: these two props can't be guaranteed, a new window will be focused/at_front..
     //       can introduce rules to define this behavior?
     pub at_front: bool,
@@ -61,6 +41,7 @@ impl State {
             position: Position { x: 0.0, y: 25.0 },
             fullscreen: false,
             hidden: false,
+            minimized: false,
             at_front: false,
             focused: false,
         }
@@ -72,9 +53,10 @@ impl State {
             Mutation::Size(size) => self.size = size,
             Mutation::Position(position) => self.position = position,
             Mutation::Fullscreen(fullscreen) => self.fullscreen = fullscreen,
-            Mutation::Hidden(hidden) => self.hidden = hidden,
-            Mutation::AtFront(at_front) => self.at_front = at_front,
-            Mutation::Focused(focused) => self.focused = focused,
+            Mutation::Hide(hidden) => self.hidden = hidden,
+            Mutation::Minimize(minimized) => self.minimized = minimized,
+            Mutation::BringToFront => self.at_front = true,
+            Mutation::Focus => self.focused = true,
         }
     }
 
@@ -112,7 +94,7 @@ impl State {
                     });
                 }
             }
-            Mutation::Hidden(_) => {
+            Mutation::Hide(_) => {
                 if self.hidden != expected.hidden {
                     return Err(ValidationError::HiddenMismatch {
                         expected: expected.hidden,
@@ -120,10 +102,18 @@ impl State {
                     });
                 }
             }
-            Mutation::AtFront(_) => {
+            Mutation::Minimize(_) => {
+                if self.minimized != expected.minimized {
+                    return Err(ValidationError::MinimizedMismatch {
+                        expected: expected.minimized,
+                        actually: self.minimized,
+                    });
+                }
+            }
+            Mutation::BringToFront => {
                 // TODO
             }
-            Mutation::Focused(_) => {
+            Mutation::Focus => {
                 // TODO
             }
         }
@@ -146,7 +136,8 @@ pub enum Mutation {
     Size(Size),
     Position(Position),
     Fullscreen(bool),
-    Hidden(bool),
-    AtFront(bool),
-    Focused(bool),
+    Hide(bool),
+    Minimize(bool),
+    BringToFront,
+    Focus,
 }

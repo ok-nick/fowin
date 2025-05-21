@@ -4,11 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-fowin-test-lib = { path = "../fowin-test-lib" }
-rand = "0.8.5"
-
-# TODO: make these optional and required for the src/bin/process.rs binary
-winit = "0.30.0"
-serde = { version = "1.0.195", features = ["derive"] }
-serde_json = "1.0.111"
-interprocess = "2.1.0"
+fowin-test-lib = { path = "../fowin-test-lib", features = ["binary_executor"] }

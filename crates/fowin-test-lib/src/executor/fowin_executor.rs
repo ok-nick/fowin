@@ -1,36 +1,29 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt::{self, Debug},
-    io::{BufRead, BufReader, Read, Write},
-    process::{self, Child},
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
-};
+use std::{collections::HashMap, fmt::Debug};
 
-use fowin::{Window, WindowError};
-use interprocess::local_socket::{
-    traits::Listener as ListenerExt, GenericNamespaced, Listener, ListenerOptions, ToNsName,
-};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use fowin::Window;
 
 use crate::{
-    encode_title,
+    executor::{encode_title, ExecutionError, Executor, WindowProps},
     state::Mutation,
     timeline::{Action, ExecScope, Step},
-    ExecutionError, Executor, Position, Size, State, Timeline, WindowProps,
+    Position, Size, Timeline,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FowinExecutor {
     windows: HashMap<u32, Window>,
+    namespace: Option<String>,
 }
 
 impl FowinExecutor {
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_namespace<T: Into<String>>(namespace: T) -> Self {
         Self {
             windows: HashMap::new(),
+            namespace: Some(namespace.into()),
         }
     }
 
@@ -52,7 +45,7 @@ impl FowinExecutor {
                 }
             }
 
-            // std::thread::sleep(Duration::from_secs(3));
+            // std::thread::sleep(std::time::Duration::from_secs(3));
             println!("VALIDATING");
 
             match step.action {
@@ -61,14 +54,23 @@ impl FowinExecutor {
                 Action::Spawn(mut state) => {
                     self.cache_window(step.id, &state.title)?;
 
-                    state.title = encode_title(step.id, &state.title);
+                    state.title = encode_title(&self.namespace, step.id, &state.title);
                     states.insert(step.id, state);
                 }
-                Action::Mutate(mutation) => {
+                Action::Mutate(mut mutation) => {
                     let state = states.get_mut(&step.id).unwrap();
-                    state.apply(mutation.to_owned());
+                    state.apply(mutation.clone());
 
+                    // TODO: this is a little bit of a hack, the title gets encoded before being set on the window,
+                    //       so to validate it we need it in its encoded state. Not a huge fan of having it here, can
+                    //       always move it into the validate function
+                    if let Mutation::Title(ref mut title) = mutation {
+                        *title = encode_title(&self.namespace, step.id, title)
+                    }
+
+                    println!("VALIDATING 1");
                     self.validate(step.id, &mutation)?;
+                    println!("VALIDATING 2");
                     executor.validate(step.id, &mutation)?;
                 }
             }
@@ -82,7 +84,7 @@ impl FowinExecutor {
             return Ok(());
         }
 
-        let title = encode_title(id, title);
+        let title = encode_title(&self.namespace, id, title);
         for window in fowin::iter_windows() {
             match window {
                 Ok(window) => {
@@ -107,21 +109,46 @@ impl Executor for FowinExecutor {
             Action::Mutate(mutation) => {
                 let window = self.windows.get(&step.id).unwrap();
                 match mutation {
-                    Mutation::Title(_) => todo!(),
-                    Mutation::Size(_) => todo!(),
-                    Mutation::Position(_) => todo!(),
-                    Mutation::Fullscreen(_) => todo!(),
-                    // TODO: add minimize mutation
-                    Mutation::Hidden(hidden) => {
-                        match hidden {
-                            true => window.minimize().unwrap(),
-                            false => window.unminimize().unwrap(),
-                        }
-
+                    Mutation::Title(_) => Err(ExecutionError::UnsupportedOperation(
+                        "fowin set title".to_owned(),
+                    )),
+                    Mutation::Size(size) => {
+                        window.resize((*size).into())?;
                         Ok(())
                     }
-                    Mutation::AtFront(_) => todo!(),
-                    Mutation::Focused(_) => todo!(),
+                    Mutation::Position(position) => {
+                        window.reposition((*position).into())?;
+                        Ok(())
+                    }
+                    Mutation::Fullscreen(fullscreen) => {
+                        match fullscreen {
+                            true => window.fullscreen()?,
+                            false => window.unfullscreen()?,
+                        }
+                        Ok(())
+                    }
+                    Mutation::Hide(hidden) => {
+                        match hidden {
+                            true => window.hide()?,
+                            false => window.show()?,
+                        }
+                        Ok(())
+                    }
+                    Mutation::Minimize(minimize) => {
+                        match minimize {
+                            true => window.minimize()?,
+                            false => window.unminimize()?,
+                        }
+                        Ok(())
+                    }
+                    Mutation::BringToFront => {
+                        window.bring_to_front()?;
+                        Ok(())
+                    }
+                    Mutation::Focus => {
+                        window.focus()?;
+                        Ok(())
+                    }
                 }
             }
             Action::Spawn(_) => Err(ExecutionError::UnsupportedOperation(
@@ -165,7 +192,10 @@ impl WindowProps for &Window {
     }
 
     fn is_hidden(&self) -> Result<bool, ExecutionError> {
-        println!("FOWIN: {:?}", Window::is_minimized(self));
+        Ok(Window::is_hidden(self)?)
+    }
+
+    fn is_minimized(&self) -> Result<bool, ExecutionError> {
         Ok(Window::is_minimized(self)?)
     }
 
@@ -176,5 +206,23 @@ impl WindowProps for &Window {
 
     fn is_focused(&self) -> Result<bool, ExecutionError> {
         Ok(Window::is_focused(self)?)
+    }
+}
+
+impl From<Size> for fowin::Size {
+    fn from(size: Size) -> Self {
+        fowin::Size {
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
+impl From<Position> for fowin::Position {
+    fn from(position: Position) -> Self {
+        fowin::Position {
+            x: position.x,
+            y: position.y,
+        }
     }
 }

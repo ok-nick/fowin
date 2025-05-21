@@ -1,0 +1,9 @@
+[package]
+name = "fowin-test-executor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fowin-test-lib = { path = "../fowin-test-lib" }
+serde_json = "1.0.121"
+interprocess = "2.2.1"

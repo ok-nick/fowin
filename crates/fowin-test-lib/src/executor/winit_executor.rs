@@ -13,10 +13,10 @@ use winit::{
 };
 
 use crate::{
-    encode_title,
+    executor::{encode_title, ExecutionError, Executor, WindowProps},
     state::Mutation,
     timeline::{Action, Step},
-    ExecutionError, Executor, Position, Size, WindowProps,
+    Position, Size,
 };
 
 #[derive(Debug)]
@@ -27,23 +27,38 @@ pub struct WinitExecutor {
 }
 
 impl WinitExecutor {
-    pub fn new() -> WinitExecutor {
+    pub fn new() -> Self {
+        Self::new_with_namespace(None)
+    }
+
+    pub fn with_namespace<T: Into<String>>(namespace: T) -> Self {
+        Self::new_with_namespace(Some(namespace.into()))
+    }
+
+    fn new_with_namespace(namespace: Option<String>) -> Self {
         let (sender, receiver) = mpsc::channel();
 
         let mut app = App {
             sender,
             windows: HashMap::new(),
+            namespace,
         };
 
         // Pump the initialization events.
         let mut event_loop = EventLoop::<Step>::with_user_event().build().unwrap();
         event_loop.pump_app_events(Some(Duration::ZERO), &mut app);
 
-        WinitExecutor {
+        Self {
             app,
             event_loop,
             receiver,
         }
+    }
+}
+
+impl Default for WinitExecutor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -63,8 +78,10 @@ impl Executor for WinitExecutor {
 
         // TODO: doesn't work properly without this. I wonder if it would be
         //       better if we had a continuous run loop? What's a reliable number to wait?
-        //       maybe if a test fails we can rerun it with longer delay?
-        std::thread::sleep(Duration::from_millis(50));
+        //       maybe if a test fails we can rerun it with longer delay? Can we listen
+        //       to events and proceed after a timeout or when they respond? I found that
+        //       anything less than 2ms and it frequently fails.
+        std::thread::sleep(Duration::from_millis(3));
 
         // Apply the new changes caused by the event.
         self.event_loop
@@ -115,15 +132,22 @@ impl WindowProps for &Window {
     }
 
     fn is_hidden(&self) -> Result<bool, ExecutionError> {
-        println!("{:?}", self.is_minimized());
-        self.is_minimized()
+        println!("{:?}", self.is_visible());
+        self.is_visible()
+            .map(|visible| !visible)
             .ok_or(ExecutionError::UnsupportedOperation(
-                "winit is_minimized".to_owned(),
+                "winit is_visible".to_owned(),
             ))
     }
 
+    fn is_minimized(&self) -> Result<bool, ExecutionError> {
+        Window::is_minimized(self).ok_or(ExecutionError::UnsupportedOperation(
+            "winit is_minimized".to_owned(),
+        ))
+    }
+
     fn is_at_front(&self) -> Result<bool, ExecutionError> {
-        // TODO
+        // TODO: set WindowLevel::AlwaysOnTop, then WindowLevel::Normal?
         Ok(todo!())
     }
 
@@ -136,11 +160,14 @@ impl WindowProps for &Window {
 struct App {
     windows: HashMap<u32, Window>,
     sender: Sender<()>,
+    namespace: Option<String>,
 }
 
 impl ApplicationHandler<Step> for App {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
+    // TODO: some events like request_inner_size are queued and the channel shouldn't be returned
+    //       until we know it's been executed
     fn user_event(&mut self, event_loop: &ActiveEventLoop, step: Step) {
         println!("RECEIVED {:?}", step);
 
@@ -149,7 +176,7 @@ impl ApplicationHandler<Step> for App {
                 let window = event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_title(encode_title(step.id, &state.title))
+                            .with_title(encode_title(&self.namespace, step.id, &state.title))
                             // TODO: use physical?
                             .with_inner_size(LogicalSize {
                                 width: state.size.width,
@@ -178,7 +205,7 @@ impl ApplicationHandler<Step> for App {
                 let window = self.windows.get_mut(&step.id).unwrap();
                 match mutation {
                     Mutation::Size(size) => {
-                        let size = window.request_inner_size(LogicalSize {
+                        let _ = window.request_inner_size(LogicalSize {
                             width: size.width,
                             height: size.height,
                         });
@@ -191,12 +218,18 @@ impl ApplicationHandler<Step> for App {
                         true => Some(Fullscreen::Borderless(None)),
                         false => None,
                     }),
-                    Mutation::Hidden(hidden) => window.set_minimized(hidden),
+                    // TODO: if we call set_visible, it will call NSWindow.orderOut, which makes the AXUIElementRef on
+                    //       macOS invalid. Therefore we must use another method of hiding a window (currently minimizing)
+                    //       although not a huge fan. Aerospace moves windows to the bottom right corner. There may also
+                    //       be a private API that can be used in fowin to detect hidden windows, although not too ideal
+                    Mutation::Hide(hidden) => window.set_minimized(hidden),
+                    Mutation::Minimize(minimized) => window.set_minimized(minimized),
                     // TODO: same as focus window?
-                    Mutation::AtFront(at_front) => todo!(),
-                    Mutation::Focused(focused) => window.focus_window(),
-                    Mutation::Title(title) => window.set_title(&encode_title(step.id, &title)),
-                    _ => {}
+                    Mutation::BringToFront => todo!(),
+                    Mutation::Focus => window.focus_window(),
+                    Mutation::Title(title) => {
+                        window.set_title(&encode_title(&self.namespace, step.id, &title))
+                    }
                 }
             }
         }
