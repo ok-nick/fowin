@@ -29,12 +29,20 @@ windows-sys = { version = "0.52.0", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.5.1"
-objc2-app-kit = { version = "0.2.0", features = [
+libc = "0.2.176"
+objc2 = "0.6.2"
+# objc2-application-services = { version = "0.3.1", default-features = false, features = [
+#     "AXError",
+#     "HIServices",
+# ] }
+objc2-application-services = "0.3.1"
+objc2-core-foundation = "0.3.1"
+objc2-app-kit = { version = "0.3.1", features = [
     "NSRunningApplication",
     "NSWorkspace",
+    "libc",
 ] }
-objc2-foundation = { version = "0.2.0", features = [
+objc2-foundation = { version = "0.3.1", features = [
     "NSString",
     "NSDictionary",
     "NSKeyValueObserving",

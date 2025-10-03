@@ -1,4 +1,13 @@
-use std::{mem::MaybeUninit, os::raw, sync::mpsc::Sender, time::Duration};
+use std::{mem::MaybeUninit, os::raw, ptr::NonNull, sync::mpsc::Sender, time::Duration};
+
+use libc::pid_t;
+use objc2_application_services::{
+    AXError, AXObserver, AXUIElement, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
+    AXUIElementSetMessagingTimeout,
+};
+use objc2_core_foundation::{
+    kCFRunLoopDefaultMode, CFArray, CFRetained, CFRunLoop, CFString, CFType,
+};
 
 use crate::{
     protocol::{self, WindowError, WindowEvent},
@@ -14,13 +23,11 @@ use super::{
         kAXErrorSuccess, kAXFocusedWindowChangedNotification, kAXMovedNotification,
         kAXResizedNotification, kAXTitleChangedNotification, kAXUIElementDestroyedNotification,
         kAXWindowCreatedNotification, kAXWindowDeminiaturizedNotification,
-        kAXWindowMiniaturizedNotification, kAXWindowsAttribute, kCFRunLoopDefaultMode, pid_t,
-        AXObserverAddNotification, AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef,
-        AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementRef, CFArrayRef,
-        CFRelease, CFRunLoopAddSource, CFStringRef, __AXObserver, __AXUIElement,
-        kAXApplicationActivatedNotification, kAXErrorNotificationUnsupported,
-        AXUIElementSetMessagingTimeout, _AXUIElementGetWindow, kAXErrorCannotComplete, CGWindowID,
-        __CFRunLoopSource,
+        kAXWindowMiniaturizedNotification, kAXWindowsAttribute, AXObserverAddNotification,
+        AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef, AXUIElementRef, CFArrayRef,
+        CFRelease, CFRunLoopAddSource, CFStringRef, CGWindowID, _AXUIElementGetWindow,
+        __AXObserver, __AXUIElement, __CFRunLoopSource, kAXApplicationActivatedNotification,
+        kAXErrorCannotComplete, kAXErrorNotificationUnsupported,
     },
     window::Window,
 };
@@ -29,7 +36,7 @@ const DEFAULT_AX_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct Application {
-    inner: AXUIElementRef,
+    inner: CFRetained<AXUIElement>,
     pid: pid_t,
     timeout: Duration,
 }
@@ -41,9 +48,10 @@ impl Application {
 
     // TODO: timeouts should be exposed to the user
     pub fn with_timeout(pid: pid_t, timeout: Duration) -> Application {
-        let inner = AXUIElementRef(unsafe { AXUIElementCreateApplication(pid) });
+        let inner = unsafe { AXUIElement::new_application(pid) };
         unsafe {
-            AXUIElementSetMessagingTimeout(inner.0, timeout.as_secs_f32());
+            // TODO: handle err
+            inner.set_messaging_timeout(timeout.as_secs_f32());
         }
 
         Application {
@@ -64,7 +72,7 @@ impl Application {
     // TODO: return iterator not struct?
     pub fn iter_windows(&self) -> Result<WindowIterator, WindowError> {
         let raw_windows = raw_windows(&self.inner)?;
-        let len = unsafe { CFArrayGetCount(raw_windows) };
+        let len = raw_windows.as_opaque().count();
         Ok(WindowIterator {
             inner: raw_windows,
             app_handle: self.inner.clone(),
@@ -93,18 +101,18 @@ impl Application {
         let mut _id: MaybeUninit<CGWindowID> = MaybeUninit::zeroed();
         unsafe {
             // TODO: avoid using private API?
-            _AXUIElementGetWindow(self.inner.0, _id.as_mut_ptr() as *mut _)
-                == kAXErrorCannotComplete
+            _AXUIElementGetWindow(&self.inner, _id.as_mut_ptr() as *mut _)
+                == AXError::CannotComplete.0
         }
     }
 }
 
 #[derive(Debug)]
 pub struct WindowIterator {
-    inner: CFArrayRef,
-    app_handle: AXUIElementRef,
-    len: i64,
-    index: i64,
+    inner: CFRetained<CFArray<AXUIElement>>,
+    app_handle: CFRetained<AXUIElement>,
+    len: isize,
+    index: isize,
 }
 
 impl Iterator for WindowIterator {
@@ -112,10 +120,11 @@ impl Iterator for WindowIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.len {
-            let element = AXUIElementRef(unsafe {
-                CFArrayGetValueAtIndex(self.inner, self.index) as *const _
-            });
-            element.increment_ref_count();
+            let element = unsafe {
+                CFRetained::retain(NonNull::new(
+                    self.inner.as_opaque().value_at_index(self.index) as *mut AXUIElement,
+                )?)
+            };
 
             self.index += 1;
 
@@ -126,26 +135,17 @@ impl Iterator for WindowIterator {
     }
 }
 
-impl Drop for WindowIterator {
-    fn drop(&mut self) {
-        // TODO: handle this from within CFArrayRef itself
-        unsafe {
-            CFRelease(self.inner as *const _);
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Watcher {
     // Resources are implicitly dropped after observer, so it's safe.
-    observer: AXObserverRef,
+    observer: CFRetained<AXObserver>,
     resources: Vec<Box<CallbackInfo>>,
 }
 
 impl Watcher {
     // Some additional information about these events:
     // https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L961-L994
-    const NOTIFICATIONS: [&str; 10] = [
+    const NOTIFICATIONS: [&'static str; 10] = [
         // This event only triggers with an app handle and always passes window handle to the callback.
         kAXWindowCreatedNotification,
         // TODO: does it pass a window or app handle?
@@ -183,34 +183,36 @@ impl Watcher {
         sender: Sender<Result<WindowEvent, WindowError>>,
     ) -> Result<Watcher, WindowError> {
         let mut observer = MaybeUninit::uninit();
-        let result = unsafe { AXObserverCreate(app.pid, app_notification, observer.as_mut_ptr()) };
+        let result = unsafe {
+            AXObserver::create(
+                app.pid,
+                Some(app_notification),
+                NonNull::new_unchecked(observer.as_mut_ptr()),
+            )
+        };
         match result {
-            kAXErrorSuccess => {
-                let observer = AXObserverRef(unsafe { observer.assume_init() });
-
+            AXError::Success => {
+                let observer =
+                    unsafe { CFRetained::from_raw(NonNull::new_unchecked(observer.assume_init())) };
                 let mut resources = Vec::new();
 
                 // Since the destroyed notification doesn't include any information on the window, we must register
                 // for each window with opaque data specifying the window being destroyed.
                 let raw_windows = raw_windows(&app.inner)?;
-                let len = unsafe { CFArrayGetCount(raw_windows) };
-                for i in 0..len {
-                    let window_handle = AXUIElementRef(unsafe {
-                        CFArrayGetValueAtIndex(raw_windows, i) as *const _
-                    });
-                    let raw_handle = window_handle.0;
+                for window_handle in raw_windows.iter() {
                     unsafe {
-                        AXUIElementSetMessagingTimeout(raw_handle, app.timeout.as_secs_f32());
+                        // TODO: handle error?
+                        window_handle.set_messaging_timeout(app.timeout.as_secs_f32());
                     }
                     let info = Box::into_raw(Box::new(CallbackInfo {
                         sender: sender.clone(),
-                        notification: Notification::Destroyed(window_handle),
+                        notification: Notification::Destroyed(window_handle.clone()),
                     }));
 
                     Watcher::add_notification(
-                        kAXUIElementDestroyedNotification,
-                        observer.0,
-                        raw_handle,
+                        &CFString::from_static_str(kAXUIElementDestroyedNotification),
+                        &observer,
+                        &window_handle,
                         info,
                     )?;
 
@@ -249,7 +251,12 @@ impl Watcher {
                         },
                     }));
 
-                    Watcher::add_notification(notification, observer.0, app.inner.0, info)?;
+                    Watcher::add_notification(
+                        &CFString::from_static_str(notification),
+                        &observer,
+                        &app.inner,
+                        info,
+                    )?;
 
                     resources.push(unsafe { Box::from_raw(info) });
                 }
@@ -259,40 +266,34 @@ impl Watcher {
                     resources,
                 })
             }
-            _ => Err(WindowError::from_ax_error(result)),
+            _ => Err(result.into()),
         }
     }
 
-    pub(crate) fn run_on_thread(&self, thread_loop: *mut __CFRunLoopSource) {
+    pub(crate) fn run_on_thread(&self, thread_loop: &CFRunLoop) {
         unsafe {
-            CFRunLoopAddSource(
-                thread_loop,
-                AXObserverGetRunLoopSource(self.observer.0),
+            thread_loop.add_source(
+                Some(&self.observer.run_loop_source()),
                 kCFRunLoopDefaultMode,
             );
         }
     }
 
     fn add_notification(
-        notification: &'static str,
-        observer_handle: *mut __AXObserver,
-        window_handle: *const __AXUIElement,
+        notification: &CFString,
+        observer_handle: &AXObserver,
+        window_handle: &AXUIElement,
         info: *mut CallbackInfo,
     ) -> Result<(), WindowError> {
         let result = unsafe {
-            AXObserverAddNotification(
-                observer_handle,
-                window_handle,
-                cfstring_from_str(notification),
-                info as *mut _,
-            )
+            observer_handle.add_notification(window_handle, notification, info as *mut _)
         };
         match result {
-            kAXErrorSuccess => {}
+            AXError::Success => {}
             // If the notification is unsupported, there's nothing we can do.
-            kAXErrorNotificationUnsupported => {}
+            AXError::NotificationUnsupported => {}
             _ => {
-                return Err(WindowError::from_ax_error(result));
+                return Err(result.into());
             }
         }
 
@@ -302,17 +303,17 @@ impl Watcher {
 
 #[derive(Debug)]
 pub enum Notification {
-    Created(AXUIElementRef),
-    Destroyed(AXUIElementRef),
-    Focused(AXUIElementRef),
-    Activated(AXUIElementRef),
-    Moved(AXUIElementRef),
-    Resized(AXUIElementRef),
-    Renamed(AXUIElementRef),
-    Shown(AXUIElementRef),
-    Hidden(AXUIElementRef),
-    Miniaturized(AXUIElementRef),
-    Deminiaturized(AXUIElementRef),
+    Created(CFRetained<AXUIElement>),
+    Destroyed(CFRetained<AXUIElement>),
+    Focused(CFRetained<AXUIElement>),
+    Activated(CFRetained<AXUIElement>),
+    Moved(CFRetained<AXUIElement>),
+    Resized(CFRetained<AXUIElement>),
+    Renamed(CFRetained<AXUIElement>),
+    Shown(CFRetained<AXUIElement>),
+    Hidden(CFRetained<AXUIElement>),
+    Miniaturized(CFRetained<AXUIElement>),
+    Deminiaturized(CFRetained<AXUIElement>),
 }
 
 impl Notification {
@@ -343,16 +344,15 @@ pub struct CallbackInfo {
     notification: Notification,
 }
 
-unsafe extern "C" fn app_notification(
-    _observer: *mut __AXObserver,
-    element: *const __AXUIElement,
-    notification: CFStringRef,
+unsafe extern "C-unwind" fn app_notification(
+    _observer: NonNull<AXObserver>,
+    element: NonNull<AXUIElement>,
+    notification: NonNull<CFString>,
     refcon: *mut raw::c_void,
 ) {
-    unsafe {
-        CFRetain(notification as *const _);
-    }
-    println!("{:?}", cfstring_to_string(notification));
+    // TODO: is this temporary for testing?
+    let notification = unsafe { CFRetained::retain(notification) };
+    println!("{:?}", notification.to_string());
 
     let callback_info = refcon as *mut CallbackInfo;
     let event = match &(*callback_info).notification {
@@ -363,8 +363,7 @@ unsafe extern "C" fn app_notification(
         | Notification::Renamed(app_handle)
         | Notification::Miniaturized(app_handle)
         | Notification::Deminiaturized(app_handle) => {
-            let window_handle = AXUIElementRef(element);
-            window_handle.increment_ref_count();
+            let window_handle = CFRetained::retain(element);
 
             let window = match Window::new(window_handle, app_handle.clone()) {
                 Ok(window) => window,
@@ -377,16 +376,17 @@ unsafe extern "C" fn app_notification(
         }
         Notification::Activated(app_handle) => {
             // TODO: lots of code dupe between above and from window module
-            let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
+            let mut window_handle = MaybeUninit::uninit();
             let result = unsafe {
-                AXUIElementCopyAttributeValue(
-                    app_handle.0,
-                    cfstring_from_str(kAXFocusedWindowAttribute),
-                    window.as_mut_ptr() as *mut _,
+                app_handle.copy_attribute_value(
+                    &CFString::from_static_str(kAXFocusedWindowAttribute),
+                    NonNull::new_unchecked(window_handle.as_mut_ptr()),
                 )
             };
-            if result == kAXErrorSuccess {
-                let window_handle = AXUIElementRef(unsafe { window.assume_init() });
+            if result == AXError::Success {
+                let window_handle = CFRetained::from_raw(
+                    NonNull::new_unchecked(&mut window_handle.assume_init()).cast::<AXUIElement>(),
+                );
                 let window = match Window::new(window_handle, app_handle.clone()) {
                     Ok(window) => window,
                     Err(_) => return,
@@ -399,11 +399,10 @@ unsafe extern "C" fn app_notification(
         }
         Notification::Shown(app_handle) | Notification::Hidden(app_handle) => {
             // TODO: we do a lot of error skipping here, reevaluate
-            let mut pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
-            let result = unsafe { AXUIElementGetPid(app_handle.0, pid.as_mut_ptr()) };
-            if result == kAXErrorSuccess {
-                let pid = unsafe { pid.assume_init() };
-                if let Ok(window_iter) = Application::new(pid).iter_windows() {
+            let mut pid = MaybeUninit::uninit();
+            let result = unsafe { app_handle.pid(NonNull::new_unchecked(pid.as_mut_ptr())) };
+            if result == AXError::Success {
+                if let Ok(window_iter) = Application::new(pid.assume_init()).iter_windows() {
                     for window in window_iter.into_iter().flatten() {
                         let _ = (*callback_info)
                             .sender
@@ -420,18 +419,23 @@ unsafe extern "C" fn app_notification(
     let _ = (*callback_info).sender.send(Ok(event));
 }
 
-pub(super) fn raw_windows(inner: &AXUIElementRef) -> Result<CFArrayRef, WindowError> {
-    let mut windows: MaybeUninit<CFArrayRef> = MaybeUninit::uninit();
+pub(super) fn raw_windows(
+    inner: &AXUIElement,
+) -> Result<CFRetained<CFArray<AXUIElement>>, WindowError> {
+    let mut windows = MaybeUninit::uninit();
     let result = unsafe {
-        AXUIElementCopyAttributeValue(
-            inner.0,
-            cfstring_from_str(kAXWindowsAttribute),
-            windows.as_mut_ptr() as *mut _,
+        inner.copy_attribute_value(
+            &CFString::from_str(kAXWindowsAttribute),
+            NonNull::new_unchecked(windows.as_mut_ptr()),
         )
     };
-    if result == kAXErrorSuccess {
-        Ok(unsafe { windows.assume_init() })
+    if result == AXError::Success {
+        Ok(unsafe {
+            CFRetained::cast_unchecked(CFRetained::from_raw(
+                NonNull::new_unchecked(&mut windows.assume_init()).cast::<CFArray>(),
+            ))
+        })
     } else {
-        Err(WindowError::from_ax_error(result))
+        Err(result.into())
     }
 }

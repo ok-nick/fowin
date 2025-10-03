@@ -1,11 +1,20 @@
 use std::{
     mem::MaybeUninit,
+    ptr::NonNull,
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use objc2::{msg_send_id, rc::Id, ClassType};
+use libc::pid_t;
+use objc2::{
+    msg_send, msg_send_id,
+    rc::{Id, Retained},
+    ClassType,
+};
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
-use objc2_foundation::{CGPoint, CGSize};
+use objc2_application_services::{AXError, AXUIElement, AXValue, AXValueType};
+use objc2_core_foundation::{
+    kCFBooleanFalse, kCFBooleanTrue, CFBoolean, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
+};
 
 use crate::{
     protocol::{Position, Size, WindowError},
@@ -16,13 +25,11 @@ use super::{
     ffi::{
         cfstring_from_str, cfstring_to_string, kAXErrorSuccess, kAXFullScreenAttribute,
         kAXMinimizedAttribute, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
-        kAXTitleAttribute, kAXValueTypeCGSize, kCFBooleanFalse, kCFBooleanTrue,
-        AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
+        kAXTitleAttribute, AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
         AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
         CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, __AXUIElement,
-        kAXFocusedWindowAttribute, kAXFrontmostAttribute, kAXValueTypeCGPoint, pid_t,
-        AXUIElementGetPid, CFArrayGetValueAtIndex, CGWindowID,
-        NSRunningApplication_processIdentifier,
+        kAXFocusedWindowAttribute, kAXFrontmostAttribute, kAXValueTypeCGPoint, AXUIElementGetPid,
+        CFArrayGetValueAtIndex, CGWindowID,
     },
     WindowHandle,
 };
@@ -32,11 +39,11 @@ pub struct Window {
     // NOTE:
     // * The ref is a pointer in another process (Carbon) or identifiers (Cocoa): https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00042.html
     // * Safe to use between threads, but will block anyways: https://lists.apple.com/archives/accessibility-dev/2012/Dec/msg00025.html
-    inner: AXUIElementRef,
+    inner: CFRetained<AXUIElement>,
     // TODO: now begs the question, can an AXUIElementRef for an application spontaneously change? Do we
     // need to validate this as well? If that's the case, then only store the application PID and we can
     // recreate the AXUIElementRef.
-    app_handle: AXUIElementRef,
+    app_handle: CFRetained<AXUIElement>,
 }
 
 // TODO: create a trait for this
@@ -44,8 +51,8 @@ pub struct Window {
 impl Window {
     // TODO: add timeouts like for applications
     pub(super) fn new(
-        inner: AXUIElementRef,
-        app_handle: AXUIElementRef,
+        inner: CFRetained<AXUIElement>,
+        app_handle: CFRetained<AXUIElement>,
     ) -> Result<Window, WindowError> {
         Ok(Window { inner, app_handle })
     }
@@ -55,21 +62,11 @@ impl Window {
     }
 
     pub fn title(&self) -> Result<String, WindowError> {
-        let mut title: MaybeUninit<CFStringRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXTitleAttribute),
-                title.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            cfstring_to_string(unsafe { title.assume_init() })
-                // TODO: different error type? it says it errors if the "conversion fails" or the buffer is too small. I believe with these paramters it should always succeed
-                .ok_or(WindowError::InvalidInternalArgument)
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        let title = Self::value_for_attribute::<CFString>(
+            &self.inner,
+            &CFString::from_static_str(kAXTitleAttribute),
+        )?;
+        Ok(title.to_string())
     }
 
     // TODO: this returns the window size + title bar size.
@@ -77,162 +74,62 @@ impl Window {
     //       make resize() include the title bar size? or just
     //       document it?
     pub fn size(&self) -> Result<Size, WindowError> {
-        let mut size: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXSizeAttribute),
-                size.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let mut frame: MaybeUninit<CGSize> = MaybeUninit::zeroed();
-            let result = unsafe {
-                let value = size.assume_init();
-                let result = AXValueGetValue(
-                    value as AXValueRef,
-                    kAXValueTypeCGSize,
-                    frame.as_mut_ptr() as *mut _,
-                );
-                CFRelease(value);
-                result
-            };
-
-            if result != 0 {
-                let frame = unsafe { frame.assume_init() };
-                Ok(Size {
-                    width: frame.width,
-                    height: frame.height,
-                })
-            } else {
-                Err(WindowError::InvalidInternalArgument)
-            }
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        let frame: CGSize = Self::value_for_ax_value(
+            &self.inner,
+            &CFString::from_static_str(kAXSizeAttribute),
+            AXValueType::CGSize,
+        )?;
+        Ok(Size {
+            width: frame.width,
+            height: frame.height,
+        })
     }
 
     // TODO: for some reason this keeps returning Err(InvalidInternalArgument)...
     pub fn position(&self) -> Result<Position, WindowError> {
-        let mut position: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXPositionAttribute),
-                position.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let mut frame: MaybeUninit<CGPoint> = MaybeUninit::zeroed();
-            let result = unsafe {
-                let value = position.assume_init();
-                AXValueGetValue(
-                    value as AXValueRef,
-                    kAXValueTypeCGPoint,
-                    frame.as_mut_ptr() as *mut _,
-                );
-                CFRelease(value);
-                result
-            };
-
-            if result != 0 {
-                let frame = unsafe { frame.assume_init() };
-                Ok(Position {
-                    x: frame.x,
-                    y: frame.y,
-                })
-            } else {
-                Err(WindowError::InvalidInternalArgument)
-            }
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        let frame: CGPoint = Self::value_for_ax_value(
+            &self.inner,
+            &CFString::from_static_str(kAXPositionAttribute),
+            AXValueType::CGPoint,
+        )?;
+        Ok(Position {
+            x: frame.x,
+            y: frame.y,
+        })
     }
 
     pub fn is_focused(&self) -> Result<bool, WindowError> {
         // First check if the application is frontmost (AKA activated AKA application is focused).
-        let mut frontmost: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.app_handle.0,
-                cfstring_from_str(kAXFrontmostAttribute),
-                frontmost.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let frontmost = unsafe {
-                let value = frontmost.assume_init();
-                let frontmost = CFBooleanGetValue(value as CFBooleanRef);
-                CFRelease(value);
-                frontmost
-            };
-            if frontmost != 0 {
-                let mut window: MaybeUninit<*const __AXUIElement> = MaybeUninit::uninit();
-                let result = unsafe {
-                    AXUIElementCopyAttributeValue(
-                        self.app_handle.0,
-                        cfstring_from_str(kAXFocusedWindowAttribute),
-                        window.as_mut_ptr() as *mut _,
-                    )
-                };
-                if result == kAXErrorSuccess {
-                    let window = AXUIElementRef(unsafe { window.assume_init() });
-                    // This tells us that this window was the last focused window within the application's windows.
-                    Ok(window == self.inner)
-                } else {
-                    Err(WindowError::from_ax_error(result))
-                }
-            } else {
-                Ok(false)
-            }
+        let frontmost = Self::bool_for_attribute(
+            &self.app_handle,
+            &CFString::from_static_str(kAXFrontmostAttribute),
+        )?;
+        if frontmost {
+            let window = Self::value_for_attribute::<AXUIElement>(
+                &self.app_handle,
+                &CFString::from_static_str(kAXFocusedWindowAttribute),
+            )?;
+
+            // This tells us that this window was the last focused window within the application's windows.
+            Ok(*window == *self.inner)
         } else {
-            Err(WindowError::from_ax_error(result))
+            Ok(false)
         }
     }
 
     // TODO: when fullscreening then unfullscreening a window it still returns true
     pub fn is_fullscreen(&self) -> Result<bool, WindowError> {
-        let mut fullscreened: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXFullScreenAttribute),
-                fullscreened.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let fullscreened = unsafe {
-                let value = fullscreened.assume_init();
-                let fullscreened = CFBooleanGetValue(value as CFBooleanRef);
-                CFRelease(value);
-                fullscreened
-            };
-            Ok(fullscreened != 0)
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::bool_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXFullScreenAttribute),
+        )
     }
 
     pub fn is_minimized(&self) -> Result<bool, WindowError> {
-        let mut minimized: MaybeUninit<CFTypeRef> = MaybeUninit::uninit();
-        let result = unsafe {
-            AXUIElementCopyAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXMinimizedAttribute),
-                minimized.as_mut_ptr() as *mut _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            let minimized = unsafe {
-                let value = minimized.assume_init();
-                let minimized = CFBooleanGetValue(value as CFBooleanRef);
-                CFRelease(value);
-                minimized
-            };
-            Ok(minimized != 0)
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::bool_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXMinimizedAttribute),
+        )
     }
 
     #[inline]
@@ -241,35 +138,29 @@ impl Window {
         self.is_minimized()
     }
 
-    // TODO: this sets the inner window size (excluding title bar)
+    // TODO: this sets the inner window wsize (excluding title bar)
     pub fn resize(&self, size: Size) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXSizeAttribute),
-                &CGSize::new(size.width, size.height) as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXSizeAttribute),
+            // TODO: fixed in next release?
+            // https://github.com/madsmtm/objc2/issues/777#issuecomment-3193276002
+            unsafe {
+                &*((&CGSize::new(size.width, size.height) as *const CGSize).cast::<CFType>())
+            },
+        )
     }
 
     pub fn reposition(&self, position: Position) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXPositionAttribute),
-                &CGPoint::new(position.x, position.y) as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXPositionAttribute),
+            // TODO: fixed in next release?
+            // https://github.com/madsmtm/objc2/issues/777#issuecomment-3193276002
+            unsafe {
+                &*((&CGPoint::new(position.x, position.y) as *const CGPoint).cast::<CFType>())
+            },
+        )
     }
 
     pub fn focus(&self) -> Result<(), WindowError> {
@@ -277,47 +168,31 @@ impl Window {
 
         // TODO: what about setting kAXFrontmostAttribute?
         unsafe {
-            let app: Id<NSRunningApplication> = msg_send_id![
+            let app: Retained<NSRunningApplication> = msg_send![
                 NSRunningApplication::class(),
                 runningApplicationWithProcessIdentifier: self.pid()?
             ];
             // TODO: supposedly this option is deprecated, but it does provide the behavior we want, TEST IT
             //       this method also returns a bool signifying if the app has quit or if it can be activated
-            app.activateWithOptions(
-                NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps,
-            );
+            app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
         }
         todo!()
     }
 
     pub fn fullscreen(&self) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXFullScreenAttribute),
-                &kCFBooleanTrue as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXFullScreenAttribute),
+            unsafe { &kCFBooleanTrue.unwrap() },
+        )
     }
 
     pub fn unfullscreen(&self) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXFullScreenAttribute),
-                &kCFBooleanFalse as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXFullScreenAttribute),
+            unsafe { &kCFBooleanFalse.unwrap() },
+        )
     }
 
     // bordered fullscreen AKA make window size of screen
@@ -327,33 +202,19 @@ impl Window {
     }
 
     pub fn minimize(&self) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXMinimizedAttribute),
-                &kCFBooleanTrue as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXMinimizedAttribute),
+            unsafe { &kCFBooleanTrue.unwrap() },
+        )
     }
 
     pub fn unminimize(&self) -> Result<(), WindowError> {
-        let result = unsafe {
-            AXUIElementSetAttributeValue(
-                self.inner.0,
-                cfstring_from_str(kAXMinimizedAttribute),
-                &kCFBooleanFalse as *const _ as *const _,
-            )
-        };
-        if result == kAXErrorSuccess {
-            Ok(())
-        } else {
-            Err(WindowError::from_ax_error(result))
-        }
+        Self::set_value_for_attribute(
+            &self.inner,
+            &CFString::from_static_str(kAXMinimizedAttribute),
+            unsafe { &kCFBooleanFalse.unwrap() },
+        )
     }
 
     // TODO: if the application is hidden, then show the application and hide other windows besides this one
@@ -367,22 +228,99 @@ impl Window {
     }
 
     pub fn bring_to_front(&self) -> Result<(), WindowError> {
-        let result =
-            unsafe { AXUIElementPerformAction(self.inner.0, cfstring_from_str(kAXRaiseAction)) };
-        if result == kAXErrorSuccess {
+        let result = unsafe {
+            self.inner
+                .perform_action(&CFString::from_static_str(kAXRaiseAction))
+        };
+        if result == AXError::Success {
             Ok(())
         } else {
-            Err(WindowError::from_ax_error(result))
+            Err(result.into())
         }
     }
 
     fn pid(&self) -> Result<pid_t, WindowError> {
         let mut pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
-        let result = unsafe { AXUIElementGetPid(self.app_handle.0, pid.as_mut_ptr()) };
-        if result == kAXErrorSuccess {
+        let result = unsafe {
+            self.app_handle
+                .pid(NonNull::new_unchecked(pid.as_mut_ptr()))
+        };
+        if result == AXError::Success {
             Ok(unsafe { pid.assume_init() })
         } else {
-            Err(WindowError::from_ax_error(result))
+            Err(result.into())
+        }
+    }
+
+    fn set_value_for_attribute(
+        handle: &AXUIElement,
+        attribute: &CFString,
+        value: &CFType,
+    ) -> Result<(), WindowError> {
+        let result = unsafe { handle.set_attribute_value(attribute, value) };
+        if result == AXError::Success {
+            Ok(())
+        } else {
+            Err(result.into())
+        }
+    }
+
+    fn value_for_attribute<T: Type>(
+        handle: &AXUIElement,
+        attribute: &CFString,
+    ) -> Result<CFRetained<T>, WindowError> {
+        let mut value = MaybeUninit::uninit();
+        let result = unsafe {
+            handle.copy_attribute_value(attribute, NonNull::new_unchecked(value.as_mut_ptr()))
+        };
+        if result == AXError::Success {
+            let value = unsafe {
+                CFRetained::from_raw(NonNull::new_unchecked(&mut value.assume_init()).cast::<T>())
+            };
+            Ok(value)
+        } else {
+            Err(result.into())
+        }
+    }
+
+    fn value_for_ax_value<T>(
+        handle: &AXUIElement,
+        attribute: &CFString,
+        value_type: AXValueType,
+    ) -> Result<T, WindowError> {
+        let ax_value = Self::value_for_attribute::<AXValue>(handle, attribute)?;
+
+        let mut frame: MaybeUninit<T> = MaybeUninit::zeroed();
+        let result = unsafe {
+            ax_value.value(
+                value_type,
+                NonNull::new_unchecked(frame.as_mut_ptr() as *mut _),
+            )
+        };
+
+        if result {
+            Ok(unsafe { frame.assume_init() })
+        } else {
+            Err(WindowError::InvalidInternalArgument)
+        }
+    }
+
+    fn bool_for_attribute(handle: &AXUIElement, attribute: &CFString) -> Result<bool, WindowError> {
+        let cf_boolean: MaybeUninit<CFType> = MaybeUninit::uninit();
+        let result = unsafe {
+            handle
+                .copy_attribute_value(&attribute, NonNull::new_unchecked(&mut cf_boolean.as_ptr()))
+        };
+        if result == AXError::Success {
+            let value = unsafe {
+                let cf_boolean = CFRetained::from_raw(
+                    NonNull::new_unchecked(&mut cf_boolean.assume_init()).cast::<CFBoolean>(),
+                );
+                cf_boolean.value()
+            };
+            Ok(value)
+        } else {
+            Err(result.into())
         }
     }
 }

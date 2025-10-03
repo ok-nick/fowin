@@ -9,14 +9,26 @@ use std::{
     time::{Duration, Instant},
 };
 
+use libc::pid_t;
 use objc2::{
-    declare_class, msg_send, msg_send_id, mutability, rc::Id, runtime::AnyObject, ClassType,
-    DeclaredClass,
+    declare_class, define_class, msg_send, msg_send_id,
+    rc::{Id, Retained},
+    runtime::AnyObject,
+    AnyThread, ClassType, DeclaredClass,
 };
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
+use objc2_application_services::{
+    kAXTrustedCheckOptionPrompt, AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
+    AXUIElement,
+};
+use objc2_core_foundation::{
+    kCFBooleanTrue, kCFRunLoopDefaultMode, CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource,
+    CFRunLoopSourceContext,
+};
 use objc2_foundation::{
     ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
-    NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSString,
+    NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSObjectNSKeyValueObserving,
+    NSString,
 };
 
 use crate::{
@@ -28,11 +40,8 @@ pub use self::{application::Application, window::Window};
 use self::{
     application::WindowIterator,
     ffi::{
-        kAXTrustedCheckOptionPrompt, kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
-        pid_t, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementRef,
-        CFDictionaryCreate, CFRelease, CFRunLoopAddSource, CFRunLoopRunInMode,
-        CFRunLoopSourceContext, CFRunLoopSourceCreate, CFRunLoopSourceRef, CGWindowID,
-        NSRunningApplication_processIdentifier,
+        CFRunLoopAddSource, CFRunLoopRunInMode, CFRunLoopSourceCreate, CFRunLoopSourceRef,
+        CGWindowID,
     },
 };
 
@@ -42,7 +51,7 @@ mod window;
 
 const TIMEOUT_STEPS: u32 = 10;
 
-pub type WindowHandle = AXUIElementRef;
+pub type WindowHandle = CFRetained<AXUIElement>;
 
 // TODO: various properties of windows
 // https://github.com/nikitabobko/AeroSpace/blob/0569bb0d663ebf732c2ea12cc168d4ff60378394/src/util/accessibility.swift#L24
@@ -144,14 +153,14 @@ impl Watcher {
             // TODO: it is impossible to get a timestamp for when an event occurs
             //       this function should run the loop to completion each call and return a vector of events
             //       this way, the next time this function is called, you know those events are guaranteed to happen after the last
-            //       vector of events. It provides some sense of ordering and the vector will only occassionally have >1 element
+            //       vector of events. It provides some sense of ordering and the vector will only occasionally have >1 element
             unsafe {
                 // Possible errors:
                 // * kCFRunLoopRunFinished: Impossible to occur, there will always be the app watcher.
                 // * kCFRunLoopRunStopped: Can only occur if the user calls it, but who cares about them.
                 // * kCFRunLoopRunTimedOut: It would take millions of years for the interval to timeout.
                 // * kCFRunLoopRunHandledSource: AKA success.
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, f64::MAX, true as u8);
+                CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, f64::MAX, true);
             }
 
             // Handle registering/deregistering launched/terminated apps.
@@ -181,9 +190,8 @@ impl Watcher {
                 let sender = self.sender.clone();
                 let app_sender = self.app_watcher.context.sender.clone();
                 let source = self.app_watcher.context.source.clone();
-                let thread_loop = CFRunLoopSourceRef(unsafe { CFRunLoopGetCurrent() });
-                // TODO: kinda hacky, we aren't responsible for ownership of the run loop
-                thread_loop.increment_ref_count();
+                // TODO: safe to unwrap?
+                let thread_loop = CFRunLoop::current().unwrap();
 
                 thread::spawn(move || {
                     let app = Application::new(event.pid);
@@ -203,7 +211,7 @@ impl Watcher {
                     match app.watch(sender.clone()) {
                         Ok(watcher) => {
                             let thread_loop = thread_loop;
-                            watcher.run_on_thread(thread_loop.0);
+                            watcher.run_on_thread(&thread_loop);
 
                             let _ = app_sender.send(AppEvent {
                                 kind: AppEventKind::Registered(watcher),
@@ -211,8 +219,8 @@ impl Watcher {
                             });
                             unsafe {
                                 let source = source;
-                                CFRunLoopSourceSignal(source.0);
-                                CFRunLoopWakeUp(thread_loop.0);
+                                source.signal();
+                                thread_loop.wake_up();
                             }
                         }
                         Err(err) => {
@@ -242,36 +250,31 @@ impl Watcher {
 }
 
 pub fn trusted() -> bool {
-    unsafe { AXIsProcessTrusted() != 0 }
+    unsafe { AXIsProcessTrusted() }
 }
 
 pub fn request_trust() -> Result<bool, WindowError> {
     let options = unsafe {
-        CFDictionaryCreate(
-            kCFAllocatorDefault,
-            [kAXTrustedCheckOptionPrompt as *const _].as_mut_ptr(),
-            [kCFBooleanTrue as *const _].as_mut_ptr(),
+        CFDictionary::new(
+            None,
+            [kAXTrustedCheckOptionPrompt as *const _ as *const _].as_mut_ptr(),
+            // TODO: safe to unwrap?
+            [kCFBooleanTrue.unwrap() as *const _ as *const _].as_mut_ptr(),
             1,
             ptr::null(),
             ptr::null(),
         )
     };
-    match options.is_null() {
-        true => Err(WindowError::ArbitraryFailure),
-        false => {
-            let result = unsafe { AXIsProcessTrustedWithOptions(options) != 0 };
-            unsafe {
-                CFRelease(options as *const _);
-            }
-            Ok(result)
-        }
+    match options {
+        Some(options) => Ok(unsafe { AXIsProcessTrustedWithOptions(Some(&options)) }),
+        None => Err(WindowError::ArbitraryFailure),
     }
 }
 
 pub fn focused_window() -> Result<Option<Window>, WindowError> {
     match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
         Some(app) => {
-            let focused_pid = unsafe { NSRunningApplication_processIdentifier(&app) };
+            let focused_pid = unsafe { app.processIdentifier() };
             for window in Application::new(focused_pid).iter_windows()? {
                 let window = window?;
                 if window.is_focused()? {
@@ -303,12 +306,12 @@ fn iter_windows_with_app_iter(
 
 fn iter_apps() -> impl Iterator<Item = Application> {
     filter_apps(unsafe { NSWorkspace::sharedWorkspace().runningApplications() }.into_iter())
-        .map(|app| Application::new(unsafe { NSRunningApplication_processIdentifier(&app) }))
+        .map(|app| Application::new(unsafe { app.processIdentifier() }))
 }
 
 fn filter_apps(
-    apps: impl Iterator<Item = Id<NSRunningApplication>>,
-) -> impl Iterator<Item = Id<NSRunningApplication>> {
+    apps: impl Iterator<Item = Retained<NSRunningApplication>>,
+) -> impl Iterator<Item = Retained<NSRunningApplication>> {
     apps
         // TODO: need to do more filtering, check out yabai, they have pretty extensive filtering
         // https://github.com/koekeishiya/yabai/issues/439
@@ -320,7 +323,7 @@ fn filter_apps(
         .filter(|app| unsafe { app.activationPolicy() } == NSApplicationActivationPolicy::Regular)
         .filter(|app| {
             // TODO: can get pid from app on main branch of objc2, waiting for release
-            let pid = unsafe { NSRunningApplication_processIdentifier(app) };
+            let pid = unsafe { app.processIdentifier() };
             // if it's -1 then the app isn't associated with a process
             pid != -1
         })
@@ -339,56 +342,64 @@ pub struct AppEvent {
     pid: pid_t,
 }
 
-declare_class!(
+define_class!(
+    #[unsafe(super(NSObject))]
+    // TODO: set a name
+    #[name = "TODO_AppWatcher"]
     #[derive(Debug)]
     struct AppWatcherInner;
 
-    unsafe impl ClassType for AppWatcherInner {
-        type Super = NSObject;
-        type Mutability = mutability::Immutable;
-        const NAME: &'static str = "TODO_AppWatcher";
-    }
-
-    impl DeclaredClass for AppWatcherInner {}
-
-    unsafe impl AppWatcherInner {
+    impl AppWatcherInner {
         #[allow(non_snake_case)]
-        #[method(observeValueForKeyPath:ofObject:change:context:)]
+        #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
         unsafe fn observeValueForKeyPath_ofObject_change_context(
             &self,
-            key_path: *mut NSString,
-            object: *mut AnyObject,
-            change: *mut NSDictionary<NSKeyValueChangeKey, NSArray<NSRunningApplication>>,
-            context: *mut c_void
+            _key_path: Option<&NSString>,
+            _object: Option<&AnyObject>,
+            change: Option<&NSDictionary<NSKeyValueChangeKey, AnyObject>>,
+            context: *mut c_void,
         ) {
-            let context = context as *mut Context;
-            let mut sent = false;
+            if let Some(change) = change {
+                let context = context as *mut Context;
+                let mut sent = false;
 
-            if let Some(new_apps)= (*change).get_retained(NSKeyValueChangeNewKey) {
-                for app in filter_apps(new_apps.into_iter()) {
-                    let _ = (*context).sender.send(AppEvent {
-                        kind: AppEventKind::Launched,
-                        pid: NSRunningApplication_processIdentifier(&app)
-                    });
+                if let Some(new_apps) = change.objectForKey(NSKeyValueChangeNewKey) {
+                    let new_apps = new_apps
+                        .downcast::<NSArray>()
+                        .unwrap()
+                        .into_iter()
+                        .map(|app| app.downcast::<NSRunningApplication>().unwrap());
+                    for app in filter_apps(new_apps) {
+                        let _ = (*context).sender.send(AppEvent {
+                            kind: AppEventKind::Launched,
+                            pid: app.processIdentifier(),
+                        });
 
-                    sent = true;
+                        sent = true;
+                    }
                 }
-            }
 
-            if let Some(old_apps) = (*change).get_retained(NSKeyValueChangeOldKey) {
-                for app in filter_apps(old_apps.into_iter()) {
-                    let _ = (*context).sender.send(AppEvent {
-                        kind: AppEventKind::Terminated,
-                        pid: NSRunningApplication_processIdentifier(&app)
-                    });
+                if let Some(old_apps) = change.objectForKey(NSKeyValueChangeOldKey) {
+                    let old_apps = old_apps
+                        .downcast::<NSArray>()
+                        .unwrap()
+                        .into_iter()
+                        .map(|app| app.downcast::<NSRunningApplication>().unwrap());
+                    for app in filter_apps(old_apps) {
+                        let _ = (*context).sender.send(AppEvent {
+                            kind: AppEventKind::Terminated,
+                            pid: app.processIdentifier(),
+                        });
 
-                    sent = true;
+                        sent = true;
+                    }
                 }
-            }
 
-            if sent {
-                CFRunLoopSourceSignal((*context).source.0);
-                CFRunLoopWakeUp(CFRunLoopGetCurrent());
+                if sent {
+                    (*context).source.signal();
+                    // TODO: safe to unwrap?
+                    CFRunLoop::current().unwrap().wake_up();
+                }
             }
         }
     }
@@ -399,13 +410,13 @@ pub struct Context {
     sender: Sender<AppEvent>,
     // The reason we create a "dummy" source is because registering a KVO (AKA AppWatcherInner) does not trigger
     // a source as being "processed" thus not prompting CFRunLoopInMode to return.
-    source: CFRunLoopSourceRef,
+    source: CFRetained<CFRunLoopSource>,
 }
 
 // TODO: kqueues also exist, but I'm not sure if it provides any advantages
 #[derive(Debug)]
 pub struct AppWatcher {
-    inner: Id<AppWatcherInner>,
+    inner: Retained<AppWatcherInner>,
     context: Box<Context>,
     receiver: Receiver<AppEvent>,
 }
@@ -417,8 +428,8 @@ unsafe extern "C" fn test(info: *mut ::std::os::raw::c_void) {
 impl AppWatcher {
     pub fn new() -> AppWatcher {
         let source = unsafe {
-            CFRunLoopSourceRef(CFRunLoopSourceCreate(
-                kCFAllocatorDefault,
+            CFRunLoopSource::new(
+                None,
                 -1,
                 &mut CFRunLoopSourceContext {
                     version: 0,
@@ -431,24 +442,31 @@ impl AppWatcher {
                     schedule: None,
                     cancel: None,
                     perform: None,
-                } as *mut _,
-            ))
+                },
+            )
         };
 
         unsafe {
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source.0, kCFRunLoopDefaultMode);
+            // TODO: safe to unwrap?
+            CFRunLoop::current()
+                .unwrap()
+                .add_source(source.as_deref(), kCFRunLoopDefaultMode);
         }
 
         let (sender, receiver) = mpsc::channel();
-        let context = Box::into_raw(Box::new(Context { sender, source }));
+        let context = Box::into_raw(Box::new(Context {
+            sender,
+            // TODO: safe to unwrap?
+            source: source.unwrap(),
+        }));
 
-        let inner: Id<AppWatcherInner> = unsafe { msg_send_id![AppWatcherInner::alloc(), init] };
+        let inner: Retained<AppWatcherInner> = unsafe { msg_send![AppWatcherInner::alloc(), init] };
         unsafe {
             let _: () = msg_send![
                 &NSWorkspace::sharedWorkspace(),
                 addObserver: &*inner,
                 forKeyPath: ns_string!("runningApplications"),
-                options: NSKeyValueObservingOptions::NSKeyValueObservingOptionNew.0 | NSKeyValueObservingOptions::NSKeyValueObservingOptionOld.0,
+                options: NSKeyValueObservingOptions::New | NSKeyValueObservingOptions::Old,
                 context: context as *const c_void
             ];
         }
@@ -497,30 +515,30 @@ impl Iterator for WindowIteratorOrErr {
     }
 }
 
-impl WindowError {
+impl From<AXError> for WindowError {
     // https://developer.apple.com/documentation/applicationservices/axerror?language=objc
-    pub(self) fn from_ax_error(code: i32) -> WindowError {
-        match code {
-            ffi::kAXErrorAPIDisabled => WindowError::NotTrusted,
-            ffi::kAXErrorIllegalArgument => WindowError::InvalidInternalArgument,
-            ffi::kAXErrorInvalidUIElementObserver => WindowError::InvalidHandle,
-            ffi::kAXErrorInvalidUIElement => WindowError::InvalidHandle,
-            ffi::kAXErrorNotImplemented => WindowError::Unsupported,
+    fn from(value: AXError) -> Self {
+        match value {
+            AXError::APIDisabled => WindowError::NotTrusted,
+            AXError::IllegalArgument => WindowError::InvalidInternalArgument,
+            AXError::InvalidUIElementObserver => WindowError::InvalidHandle,
+            AXError::InvalidUIElement => WindowError::InvalidHandle,
+            AXError::NotImplemented => WindowError::Unsupported,
             // attempt to retrieve unsupported attribute
-            ffi::kAXErrorNoValue => WindowError::Unsupported,
-            ffi::kAXErrorAttributeUnsupported => WindowError::Unsupported,
-            ffi::kAXErrorParameterizedAttributeUnsupported => WindowError::Unsupported,
-            ffi::kAXErrorActionUnsupported => WindowError::Unsupported,
-            ffi::kAXErrorNotificationUnsupported => WindowError::Unsupported,
+            AXError::NoValue => WindowError::Unsupported,
+            AXError::AttributeUnsupported => WindowError::Unsupported,
+            AXError::ParameterizedAttributeUnsupported => WindowError::Unsupported,
+            AXError::ActionUnsupported => WindowError::Unsupported,
+            AXError::NotificationUnsupported => WindowError::Unsupported,
             // because this event shouldn't be possible (it's handled manually) and there is no enum variant for it, we label it as an arbitrary error
-            ffi::kAXErrorNotificationAlreadyRegistered => WindowError::ArbitraryFailure,
+            AXError::NotificationAlreadyRegistered => WindowError::ArbitraryFailure,
             // same here
-            ffi::kAXErrorNotificationNotRegistered => WindowError::ArbitraryFailure,
+            AXError::NotificationNotRegistered => WindowError::ArbitraryFailure,
             // no idea when this could occur, it's not documented
-            ffi::kAXErrorNotEnoughPrecision => WindowError::ArbitraryFailure,
+            AXError::NotEnoughPrecision => WindowError::ArbitraryFailure,
             // called when the accessibility API timeout is reached
-            ffi::kAXErrorCannotComplete => WindowError::ArbitraryFailure,
-            ffi::kAXErrorFailure => WindowError::ArbitraryFailure,
+            AXError::CannotComplete => WindowError::ArbitraryFailure,
+            AXError::Failure => WindowError::ArbitraryFailure,
             _ => WindowError::ArbitraryFailure,
         }
     }

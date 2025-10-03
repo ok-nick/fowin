@@ -15,6 +15,8 @@ use std::{
     mem,
 };
 
+use objc2_application_services::AXUIElement;
+
 pub const kAXErrorSuccess: i32 = 0;
 pub const kAXErrorFailure: i32 = -25200;
 pub const kAXErrorIllegalArgument: i32 = -25201;
@@ -558,8 +560,6 @@ extern "C" {
 extern "C" {
     pub static mut kAXTrustedCheckOptionPrompt: CFStringRef;
 
-    pub fn AXUIElementCreateApplication(pid: pid_t) -> *const __AXUIElement;
-
     pub fn AXObserverCreate(
         application: pid_t,
         callback: AXObserverCallback,
@@ -600,8 +600,7 @@ extern "C" {
     ) -> AXError;
 
     // PRIVATE API
-    pub fn _AXUIElementGetWindow(element: *const __AXUIElement, identifier: *mut CGWindowID)
-        -> i32;
+    pub fn _AXUIElementGetWindow(element: &AXUIElement, identifier: *mut CGWindowID) -> i32;
 
     pub fn AXValueGetValue(
         value: AXValueRef,
@@ -619,22 +618,11 @@ extern "C" {
 
     pub fn AXUIElementCreateSystemWide() -> AXUIElementRef;
 
-    pub fn AXUIElementSetMessagingTimeout(
-        element: *const __AXUIElement,
-        timeoutInSeconds: f32,
-    ) -> AXError;
-
     pub fn AXUIElementIsAttributeSettable(
         element: *const __AXUIElement,
         attribute: CFStringRef,
         settable: *mut Boolean,
     ) -> AXError;
-}
-
-pub unsafe fn NSRunningApplication_processIdentifier(
-    app: &objc2_app_kit::NSRunningApplication,
-) -> pid_t {
-    objc2::msg_send![app, processIdentifier]
 }
 
 // TODO: need to CFRelease
