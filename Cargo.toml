@@ -16,30 +16,47 @@ members = [".", "crates/*"]
 flume = "0.11.0"
 windows-interface = "0.56.0"
 windows-sys = { version = "0.52.0", features = [
-    "Win32",
-    "Win32_UI",
-    "Win32_Foundation",
-    "Win32_System",
-    "Win32_System_Threading",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Accessibility",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_Graphics_Dwm",
-    "Win32_Graphics_Gdi",
+  "Win32",
+  "Win32_UI",
+  "Win32_Foundation",
+  "Win32_System",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.5.1"
-objc2-app-kit = { version = "0.2.0", features = [
-    "NSRunningApplication",
-    "NSWorkspace",
+libc = "0.2.176"
+objc2 = "0.6.3"
+objc2-application-services = { version = "0.3.2", default-features = false, features = [
+  "AXError",
+  "AXUIElement",
+  "AXValue",
+  "HIServices",
+  "libc",
+  "std",
 ] }
-objc2-foundation = { version = "0.2.0", features = [
-    "NSString",
-    "NSDictionary",
-    "NSKeyValueObserving",
-    "NSGeometry",
-    "NSEnumerator",
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+  "CFNumber",
+  "CFString",
+  "std",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "NSRunningApplication",
+  "NSWorkspace",
+  "libc",
+  "std",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+  "NSString",
+  "NSDictionary",
+  "NSKeyValueObserving",
+  "NSGeometry",
+  "NSEnumerator",
+  "std",
 ] }
 
 [dev-dependencies]

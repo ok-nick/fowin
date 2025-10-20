@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, io, time::Instant};
+use std::{error::Error, fmt, io};
 
 pub use window::Window;
 
