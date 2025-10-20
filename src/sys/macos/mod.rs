@@ -205,11 +205,8 @@ impl Watcher {
                                 kind: AppEventKind::Registered(watcher),
                                 pid: app.pid(),
                             });
-                            unsafe {
-                                let source = source;
-                                source.signal();
-                                thread_loop.wake_up();
-                            }
+                            source.signal();
+                            thread_loop.wake_up();
                         }
                         Err(err) => {
                             // TODO: in this case, return a struct dedicated to reconnecting the failed watcher that the user can handle
@@ -260,9 +257,9 @@ pub fn request_trust() -> Result<bool, WindowError> {
 }
 
 pub fn focused_window() -> Result<Option<Window>, WindowError> {
-    match unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() } {
+    match NSWorkspace::sharedWorkspace().frontmostApplication() {
         Some(app) => {
-            let focused_pid = unsafe { app.processIdentifier() };
+            let focused_pid = app.processIdentifier();
             for window in Application::new(focused_pid).iter_windows()? {
                 let window = window?;
                 if window.is_focused()? {
@@ -293,8 +290,12 @@ fn iter_windows_with_app_iter(
 }
 
 fn iter_apps() -> impl Iterator<Item = Application> {
-    filter_apps(unsafe { NSWorkspace::sharedWorkspace().runningApplications() }.into_iter())
-        .map(|app| Application::new(unsafe { app.processIdentifier() }))
+    filter_apps(
+        NSWorkspace::sharedWorkspace()
+            .runningApplications()
+            .into_iter(),
+    )
+    .map(|app| Application::new(app.processIdentifier()))
 }
 
 fn filter_apps(
@@ -308,10 +309,10 @@ fn filter_apps(
         //
         // NOTE: ideally we'd include ::Accessory activation policy apps, but most (if not all) of them are irrelevant
         //       and cause significant slow downs
-        .filter(|app| unsafe { app.activationPolicy() } == NSApplicationActivationPolicy::Regular)
+        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
         .filter(|app| {
             // TODO: can get pid from app on main branch of objc2, waiting for release
-            let pid = unsafe { app.processIdentifier() };
+            let pid = app.processIdentifier();
             // if it's -1 then the app isn't associated with a process
             pid != -1
         })
