@@ -35,6 +35,10 @@ pub type CGWindowID = u32;
 //       https://lists.apple.com/archives/accessibility-dev/2006/Jun/msg00010.html
 //       https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L305
 
+// TODO: macOS doesn't clearly define some accessibility and core foundation APIs as thread safe, although we assume they are
+//       because the APIs are super flaky otherwise. This seems to work well for window managers like Aerospace. There's an
+//       open issue in objc2 for marking some of these APIs as thread-safe.
+//       https://github.com/madsmtm/objc2/issues/696
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct CFRetainedSafe<T: Type>(pub CFRetained<T>);
@@ -46,6 +50,7 @@ impl<T: Type> Clone for CFRetainedSafe<T> {
 }
 
 unsafe impl<T: Type> Send for CFRetainedSafe<T> {}
+unsafe impl<T: Type> Sync for CFRetainedSafe<T> {}
 
 impl<T: Type> Deref for CFRetainedSafe<T> {
     type Target = CFRetained<T>;
