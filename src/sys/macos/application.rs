@@ -1,4 +1,10 @@
-use std::{mem::MaybeUninit, os::raw, ptr::NonNull, sync::mpsc::Sender, time::Duration};
+use std::{
+    mem::{self, MaybeUninit},
+    os::raw,
+    ptr::{self, NonNull},
+    sync::mpsc::Sender,
+    time::Duration,
+};
 
 use libc::pid_t;
 use objc2_application_services::{
@@ -101,11 +107,9 @@ impl Application {
     // take more than 1 second to respond, although, those applications typically don't allow access to their AX APIs
     // anyways. If there is a valid application that takes over 1 second to respond (extremely unlikely), then oops.
     pub(crate) fn should_wait(&self) -> bool {
-        let mut _id: MaybeUninit<CGWindowID> = MaybeUninit::zeroed();
         unsafe {
             // TODO: avoid using private API?
-            _AXUIElementGetWindow(&self.inner, _id.as_mut_ptr() as *mut _)
-                == AXError::CannotComplete.0
+            _AXUIElementGetWindow(&self.inner, &mut 0u32) == AXError::CannotComplete.0
         }
     }
 }
@@ -185,18 +189,17 @@ impl Watcher {
         app: &Application,
         sender: Sender<Result<WindowEvent, WindowError>>,
     ) -> Result<Watcher, WindowError> {
-        let mut observer = MaybeUninit::uninit();
+        let mut observer = ptr::null_mut();
         let result = unsafe {
             AXObserver::create(
                 app.pid,
                 Some(app_notification),
-                NonNull::new_unchecked(observer.as_mut_ptr()),
+                NonNull::new_unchecked(&mut observer),
             )
         };
         match result {
             AXError::Success => {
-                let observer =
-                    unsafe { CFRetained::from_raw(NonNull::new_unchecked(observer.assume_init())) };
+                let observer = unsafe { CFRetained::from_raw(NonNull::new_unchecked(observer)) };
                 let mut resources = Vec::new();
 
                 // Since the destroyed notification doesn't include any information on the window, we must register
@@ -381,17 +384,16 @@ unsafe extern "C-unwind" fn app_notification(
         }
         Notification::Activated(app_handle) => {
             // TODO: lots of code dupe between above and from window module
-            let mut window_handle = MaybeUninit::uninit();
+            let mut window_handle = ptr::null();
             let result = unsafe {
                 app_handle.copy_attribute_value(
                     &CFString::from_static_str(kAXFocusedWindowAttribute),
-                    NonNull::new_unchecked(window_handle.as_mut_ptr()),
+                    NonNull::new_unchecked(&mut window_handle),
                 )
             };
             if result == AXError::Success {
-                let window_handle = CFRetained::from_raw(
-                    NonNull::new_unchecked(&mut window_handle.assume_init()).cast::<AXUIElement>(),
-                );
+                let window_handle =
+                    CFRetained::from_raw(NonNull::new_unchecked(window_handle as *mut _));
                 let window = match Window::new(window_handle, app_handle.0.clone()) {
                     Ok(window) => window,
                     Err(_) => return,
@@ -404,10 +406,10 @@ unsafe extern "C-unwind" fn app_notification(
         }
         Notification::Shown(app_handle) | Notification::Hidden(app_handle) => {
             // TODO: we do a lot of error skipping here, reevaluate
-            let mut pid = MaybeUninit::uninit();
-            let result = unsafe { app_handle.pid(NonNull::new_unchecked(pid.as_mut_ptr())) };
+            let mut pid = 0;
+            let result = unsafe { app_handle.pid(NonNull::new_unchecked(&mut pid)) };
             if result == AXError::Success {
-                if let Ok(window_iter) = Application::new(pid.assume_init()).iter_windows() {
+                if let Ok(window_iter) = Application::new(pid).iter_windows() {
                     for window in window_iter.into_iter().flatten() {
                         let _ = (*callback_info)
                             .sender
@@ -427,19 +429,15 @@ unsafe extern "C-unwind" fn app_notification(
 pub(super) fn raw_windows(
     inner: &AXUIElement,
 ) -> Result<CFRetained<CFArray<AXUIElement>>, WindowError> {
-    let mut windows = MaybeUninit::uninit();
+    let mut windows = ptr::null();
     let result = unsafe {
         inner.copy_attribute_value(
             &CFString::from_str(kAXWindowsAttribute),
-            NonNull::new_unchecked(windows.as_mut_ptr()),
+            NonNull::from_mut(&mut windows),
         )
     };
     if result == AXError::Success {
-        Ok(unsafe {
-            CFRetained::cast_unchecked(CFRetained::from_raw(
-                NonNull::new_unchecked(&mut windows.assume_init()).cast::<CFArray>(),
-            ))
-        })
+        Ok(unsafe { CFRetained::from_raw(NonNull::new_unchecked(windows as *mut _)) })
     } else {
         Err(result.into())
     }

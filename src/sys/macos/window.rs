@@ -1,6 +1,6 @@
 use std::{
     mem::MaybeUninit,
-    ptr::NonNull,
+    ptr::{self, NonNull},
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
@@ -88,7 +88,6 @@ impl Window {
         })
     }
 
-    // TODO: for some reason this keeps returning Err(InvalidInternalArgument)...
     pub fn position(&self) -> Result<Position, WindowError> {
         let frame: CGPoint = Self::value_for_ax_value(
             &self.inner,
@@ -186,7 +185,7 @@ impl Window {
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXFullScreenAttribute),
-            unsafe { &kCFBooleanTrue.unwrap() },
+            unsafe { kCFBooleanTrue.unwrap() },
         )
     }
 
@@ -194,7 +193,7 @@ impl Window {
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXFullScreenAttribute),
-            unsafe { &kCFBooleanFalse.unwrap() },
+            unsafe { kCFBooleanFalse.unwrap() },
         )
     }
 
@@ -208,7 +207,7 @@ impl Window {
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXMinimizedAttribute),
-            unsafe { &kCFBooleanTrue.unwrap() },
+            unsafe { kCFBooleanTrue.unwrap() },
         )
     }
 
@@ -216,7 +215,7 @@ impl Window {
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXMinimizedAttribute),
-            unsafe { &kCFBooleanFalse.unwrap() },
+            unsafe { kCFBooleanFalse.unwrap() },
         )
     }
 
@@ -243,13 +242,10 @@ impl Window {
     }
 
     fn pid(&self) -> Result<pid_t, WindowError> {
-        let mut pid: MaybeUninit<pid_t> = MaybeUninit::uninit();
-        let result = unsafe {
-            self.app_handle
-                .pid(NonNull::new_unchecked(pid.as_mut_ptr()))
-        };
+        let mut pid = 0;
+        let result = unsafe { self.app_handle.pid(NonNull::new_unchecked(&mut pid)) };
         if result == AXError::Success {
-            Ok(unsafe { pid.assume_init() })
+            Ok(pid)
         } else {
             Err(result.into())
         }
@@ -272,14 +268,11 @@ impl Window {
         handle: &AXUIElement,
         attribute: &CFString,
     ) -> Result<CFRetained<T>, WindowError> {
-        let mut value = MaybeUninit::uninit();
-        let result = unsafe {
-            handle.copy_attribute_value(attribute, NonNull::new_unchecked(value.as_mut_ptr()))
-        };
+        let mut value = ptr::null();
+        let result =
+            unsafe { handle.copy_attribute_value(attribute, NonNull::new_unchecked(&mut value)) };
         if result == AXError::Success {
-            let value = unsafe {
-                CFRetained::from_raw(NonNull::new_unchecked(&mut value.assume_init()).cast::<T>())
-            };
+            let value = unsafe { CFRetained::from_raw(NonNull::new_unchecked(value as *mut _)) };
             Ok(value)
         } else {
             Err(result.into())
@@ -293,11 +286,11 @@ impl Window {
     ) -> Result<T, WindowError> {
         let ax_value = Self::value_for_attribute::<AXValue>(handle, attribute)?;
 
-        let mut frame: MaybeUninit<T> = MaybeUninit::zeroed();
+        let mut frame = MaybeUninit::uninit();
         let result = unsafe {
             ax_value.value(
                 value_type,
-                NonNull::new_unchecked(frame.as_mut_ptr() as *mut _),
+                NonNull::new_unchecked(frame.as_mut_ptr()).cast(),
             )
         };
 
@@ -309,16 +302,13 @@ impl Window {
     }
 
     fn bool_for_attribute(handle: &AXUIElement, attribute: &CFString) -> Result<bool, WindowError> {
-        let cf_boolean: MaybeUninit<CFType> = MaybeUninit::uninit();
-        let result = unsafe {
-            handle
-                .copy_attribute_value(&attribute, NonNull::new_unchecked(&mut cf_boolean.as_ptr()))
-        };
+        let mut cf_boolean = ptr::null();
+        let result =
+            unsafe { handle.copy_attribute_value(attribute, NonNull::from_mut(&mut cf_boolean)) };
         if result == AXError::Success {
             let value = unsafe {
-                let cf_boolean = CFRetained::from_raw(
-                    NonNull::new_unchecked(&mut cf_boolean.assume_init()).cast::<CFBoolean>(),
-                );
+                let cf_boolean =
+                    CFRetained::from_raw(NonNull::new_unchecked(cf_boolean as *mut CFBoolean));
                 cf_boolean.value()
             };
             Ok(value)
