@@ -33,7 +33,10 @@ use objc2_foundation::{
 
 use crate::{
     protocol::{WindowError, WindowEvent},
-    sys::platform::ffi::{CFRunLoopGetCurrent, CFRunLoopSourceSignal, CFRunLoopWakeUp},
+    sys::platform::{
+        ffi::{CFRunLoopGetCurrent, CFRunLoopSourceSignal, CFRunLoopWakeUp},
+        ffi2::CFRetainedSafe,
+    },
 };
 
 pub use self::{application::Application, window::Window};
@@ -47,11 +50,12 @@ use self::{
 
 mod application;
 mod ffi;
+mod ffi2;
 mod window;
 
 const TIMEOUT_STEPS: u32 = 10;
 
-pub type WindowHandle = CFRetained<AXUIElement>;
+pub type WindowHandle = CFRetainedSafe<AXUIElement>;
 
 // TODO: various properties of windows
 // https://github.com/nikitabobko/AeroSpace/blob/0569bb0d663ebf732c2ea12cc168d4ff60378394/src/util/accessibility.swift#L24
@@ -189,9 +193,9 @@ impl Watcher {
                 // time for the app to initialize.
                 let sender = self.sender.clone();
                 let app_sender = self.app_watcher.context.sender.clone();
-                let source = self.app_watcher.context.source.clone();
+                let source = CFRetainedSafe(self.app_watcher.context.source.clone());
                 // TODO: safe to unwrap?
-                let thread_loop = CFRunLoop::current().unwrap();
+                let thread_loop = CFRetainedSafe(CFRunLoop::current().unwrap());
 
                 thread::spawn(move || {
                     let app = Application::new(event.pid);

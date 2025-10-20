@@ -18,7 +18,7 @@ use objc2_core_foundation::{
 
 use crate::{
     protocol::{Position, Size, WindowError},
-    sys::platform::{application, ffi::CFArrayGetCount},
+    sys::platform::{application, ffi::CFArrayGetCount, ffi2::CFRetainedSafe},
 };
 
 use super::{
@@ -39,11 +39,11 @@ pub struct Window {
     // NOTE:
     // * The ref is a pointer in another process (Carbon) or identifiers (Cocoa): https://lists.apple.com/archives/accessibility-dev/2013/Jun/msg00042.html
     // * Safe to use between threads, but will block anyways: https://lists.apple.com/archives/accessibility-dev/2012/Dec/msg00025.html
-    inner: CFRetained<AXUIElement>,
+    inner: CFRetainedSafe<AXUIElement>,
     // TODO: now begs the question, can an AXUIElementRef for an application spontaneously change? Do we
     // need to validate this as well? If that's the case, then only store the application PID and we can
     // recreate the AXUIElementRef.
-    app_handle: CFRetained<AXUIElement>,
+    app_handle: CFRetainedSafe<AXUIElement>,
 }
 
 // TODO: create a trait for this
@@ -54,7 +54,10 @@ impl Window {
         inner: CFRetained<AXUIElement>,
         app_handle: CFRetained<AXUIElement>,
     ) -> Result<Window, WindowError> {
-        Ok(Window { inner, app_handle })
+        Ok(Window {
+            inner: CFRetainedSafe(inner),
+            app_handle: CFRetainedSafe(app_handle),
+        })
     }
 
     pub fn handle(&self) -> WindowHandle {
@@ -111,7 +114,7 @@ impl Window {
             )?;
 
             // This tells us that this window was the last focused window within the application's windows.
-            Ok(*window == *self.inner)
+            Ok(*window == *self.inner.0)
         } else {
             Ok(false)
         }

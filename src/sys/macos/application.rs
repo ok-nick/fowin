@@ -11,9 +11,12 @@ use objc2_core_foundation::{
 
 use crate::{
     protocol::{self, WindowError, WindowEvent},
-    sys::platform::ffi::{
-        cfstring_to_string, kAXFocusedWindowAttribute, AXUIElementGetPid, CFArrayGetCount,
-        CFArrayGetValueAtIndex, CFHash, CFRetain,
+    sys::platform::{
+        ffi::{
+            cfstring_to_string, kAXFocusedWindowAttribute, AXUIElementGetPid, CFArrayGetCount,
+            CFArrayGetValueAtIndex, CFHash, CFRetain,
+        },
+        ffi2::CFRetainedSafe,
     },
 };
 
@@ -36,7 +39,7 @@ const DEFAULT_AX_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct Application {
-    inner: CFRetained<AXUIElement>,
+    inner: CFRetainedSafe<AXUIElement>,
     pid: pid_t,
     timeout: Duration,
 }
@@ -55,7 +58,7 @@ impl Application {
         }
 
         Application {
-            inner,
+            inner: CFRetainedSafe(inner),
             pid,
             timeout,
         }
@@ -75,7 +78,7 @@ impl Application {
         let len = raw_windows.as_opaque().count();
         Ok(WindowIterator {
             inner: raw_windows,
-            app_handle: self.inner.clone(),
+            app_handle: self.inner.0.clone(),
             len,
             index: 0,
         })
@@ -138,7 +141,7 @@ impl Iterator for WindowIterator {
 #[derive(Debug)]
 pub struct Watcher {
     // Resources are implicitly dropped after observer, so it's safe.
-    observer: CFRetained<AXObserver>,
+    observer: CFRetainedSafe<AXObserver>,
     resources: Vec<Box<CallbackInfo>>,
 }
 
@@ -206,7 +209,9 @@ impl Watcher {
                     }
                     let info = Box::into_raw(Box::new(CallbackInfo {
                         sender: sender.clone(),
-                        notification: Notification::Destroyed(window_handle.clone()),
+                        notification: Notification::Destroyed(CFRetainedSafe(
+                            window_handle.clone(),
+                        )),
                     }));
 
                     Watcher::add_notification(
@@ -262,7 +267,7 @@ impl Watcher {
                 }
 
                 Ok(Watcher {
-                    observer,
+                    observer: CFRetainedSafe(observer),
                     resources,
                 })
             }
@@ -303,17 +308,17 @@ impl Watcher {
 
 #[derive(Debug)]
 pub enum Notification {
-    Created(CFRetained<AXUIElement>),
-    Destroyed(CFRetained<AXUIElement>),
-    Focused(CFRetained<AXUIElement>),
-    Activated(CFRetained<AXUIElement>),
-    Moved(CFRetained<AXUIElement>),
-    Resized(CFRetained<AXUIElement>),
-    Renamed(CFRetained<AXUIElement>),
-    Shown(CFRetained<AXUIElement>),
-    Hidden(CFRetained<AXUIElement>),
-    Miniaturized(CFRetained<AXUIElement>),
-    Deminiaturized(CFRetained<AXUIElement>),
+    Created(CFRetainedSafe<AXUIElement>),
+    Destroyed(CFRetainedSafe<AXUIElement>),
+    Focused(CFRetainedSafe<AXUIElement>),
+    Activated(CFRetainedSafe<AXUIElement>),
+    Moved(CFRetainedSafe<AXUIElement>),
+    Resized(CFRetainedSafe<AXUIElement>),
+    Renamed(CFRetainedSafe<AXUIElement>),
+    Shown(CFRetainedSafe<AXUIElement>),
+    Hidden(CFRetainedSafe<AXUIElement>),
+    Miniaturized(CFRetainedSafe<AXUIElement>),
+    Deminiaturized(CFRetainedSafe<AXUIElement>),
 }
 
 impl Notification {
@@ -365,7 +370,7 @@ unsafe extern "C-unwind" fn app_notification(
         | Notification::Deminiaturized(app_handle) => {
             let window_handle = CFRetained::retain(element);
 
-            let window = match Window::new(window_handle, app_handle.clone()) {
+            let window = match Window::new(window_handle, app_handle.0.clone()) {
                 Ok(window) => window,
                 // TODO: error?
                 // If we can't make a window, then we can't get its id, which means there's some fishy business going on...
@@ -387,7 +392,7 @@ unsafe extern "C-unwind" fn app_notification(
                 let window_handle = CFRetained::from_raw(
                     NonNull::new_unchecked(&mut window_handle.assume_init()).cast::<AXUIElement>(),
                 );
-                let window = match Window::new(window_handle, app_handle.clone()) {
+                let window = match Window::new(window_handle, app_handle.0.clone()) {
                     Ok(window) => window,
                     Err(_) => return,
                 };
