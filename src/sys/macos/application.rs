@@ -1,5 +1,4 @@
 use std::{
-    mem::{self, MaybeUninit},
     os::raw,
     ptr::{self, NonNull},
     sync::mpsc::Sender,
@@ -7,36 +6,22 @@ use std::{
 };
 
 use libc::pid_t;
-use objc2_application_services::{
-    AXError, AXObserver, AXUIElement, AXUIElementCopyAttributeValue, AXUIElementCreateApplication,
-    AXUIElementSetMessagingTimeout,
-};
-use objc2_core_foundation::{
-    kCFRunLoopDefaultMode, CFArray, CFRetained, CFRunLoop, CFString, CFType,
-};
+use objc2_application_services::{AXError, AXObserver, AXUIElement};
+use objc2_core_foundation::{kCFRunLoopDefaultMode, CFArray, CFRetained, CFRunLoop, CFString};
 
 use crate::{
     protocol::{self, WindowError, WindowEvent},
-    sys::platform::{
-        ffi::{
-            cfstring_to_string, kAXFocusedWindowAttribute, AXUIElementGetPid, CFArrayGetCount,
-            CFArrayGetValueAtIndex, CFHash, CFRetain,
-        },
-        ffi2::CFRetainedSafe,
-    },
+    sys::platform::ffi::{kAXFocusedWindowAttribute, CFRetainedSafe},
 };
 
 use super::{
     ffi::{
-        cfstring_from_str, kAXApplicationHiddenNotification, kAXApplicationShownNotification,
-        kAXErrorSuccess, kAXFocusedWindowChangedNotification, kAXMovedNotification,
-        kAXResizedNotification, kAXTitleChangedNotification, kAXUIElementDestroyedNotification,
+        _AXUIElementGetWindow, kAXApplicationActivatedNotification,
+        kAXApplicationHiddenNotification, kAXApplicationShownNotification,
+        kAXFocusedWindowChangedNotification, kAXMovedNotification, kAXResizedNotification,
+        kAXTitleChangedNotification, kAXUIElementDestroyedNotification,
         kAXWindowCreatedNotification, kAXWindowDeminiaturizedNotification,
-        kAXWindowMiniaturizedNotification, kAXWindowsAttribute, AXObserverAddNotification,
-        AXObserverCreate, AXObserverGetRunLoopSource, AXObserverRef, AXUIElementRef, CFArrayRef,
-        CFRelease, CFRunLoopAddSource, CFStringRef, CGWindowID, _AXUIElementGetWindow,
-        __AXObserver, __AXUIElement, __CFRunLoopSource, kAXApplicationActivatedNotification,
-        kAXErrorCannotComplete, kAXErrorNotificationUnsupported,
+        kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
     },
     window::Window,
 };
@@ -146,7 +131,8 @@ impl Iterator for WindowIterator {
 pub struct Watcher {
     // Resources are implicitly dropped after observer, so it's safe.
     observer: CFRetainedSafe<AXObserver>,
-    resources: Vec<Box<CallbackInfo>>,
+    // TODO: maybe this should be an Arc instead of a Box?
+    _resources: Vec<Box<CallbackInfo>>,
 }
 
 impl Watcher {
@@ -200,11 +186,13 @@ impl Watcher {
         match result {
             AXError::Success => {
                 let observer = unsafe { CFRetained::from_raw(NonNull::new_unchecked(observer)) };
-                let mut resources = Vec::new();
+
+                let raw_windows = raw_windows(&app.inner)?;
+                let mut resources =
+                    Vec::with_capacity(raw_windows.len() + Watcher::NOTIFICATIONS.len());
 
                 // Since the destroyed notification doesn't include any information on the window, we must register
                 // for each window with opaque data specifying the window being destroyed.
-                let raw_windows = raw_windows(&app.inner)?;
                 for window_handle in raw_windows.iter() {
                     unsafe {
                         // TODO: handle error?
@@ -271,7 +259,7 @@ impl Watcher {
 
                 Ok(Watcher {
                     observer: CFRetainedSafe(observer),
-                    resources,
+                    _resources: resources,
                 })
             }
             _ => Err(result.into()),
@@ -358,9 +346,9 @@ unsafe extern "C-unwind" fn app_notification(
     notification: NonNull<CFString>,
     refcon: *mut raw::c_void,
 ) {
-    // TODO: is this temporary for testing?
+    // TODO: is this retain temporary for testing?
     let notification = unsafe { CFRetained::retain(notification) };
-    println!("{:?}", notification.to_string());
+    // println!("{:?}", notification.to_string());
 
     let callback_info = refcon as *mut CallbackInfo;
     let event = match &(*callback_info).notification {

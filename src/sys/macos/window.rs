@@ -1,15 +1,10 @@
 use std::{
     mem::MaybeUninit,
     ptr::{self, NonNull},
-    sync::{Arc, RwLock, RwLockReadGuard},
 };
 
 use libc::pid_t;
-use objc2::{
-    msg_send, msg_send_id,
-    rc::{Id, Retained},
-    ClassType,
-};
+use objc2::{msg_send, rc::Retained, ClassType};
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
 use objc2_application_services::{AXError, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
@@ -18,18 +13,14 @@ use objc2_core_foundation::{
 
 use crate::{
     protocol::{Position, Size, WindowError},
-    sys::platform::{application, ffi::CFArrayGetCount, ffi2::CFRetainedSafe},
+    sys::platform::ffi::CFRetainedSafe,
 };
 
 use super::{
     ffi::{
-        cfstring_from_str, cfstring_to_string, kAXErrorSuccess, kAXFullScreenAttribute,
+        kAXFocusedWindowAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
         kAXMinimizedAttribute, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
-        kAXTitleAttribute, AXUIElementCopyAttributeValue, AXUIElementPerformAction, AXUIElementRef,
-        AXUIElementSetAttributeValue, AXValueGetValue, AXValueRef, CFBooleanGetValue, CFBooleanRef,
-        CFRelease, CFStringRef, CFTypeRef, _AXUIElementGetWindow, __AXUIElement,
-        kAXFocusedWindowAttribute, kAXFrontmostAttribute, kAXValueTypeCGPoint, AXUIElementGetPid,
-        CFArrayGetValueAtIndex, CGWindowID,
+        kAXTitleAttribute,
     },
     WindowHandle,
 };

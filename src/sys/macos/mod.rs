@@ -10,12 +10,7 @@ use std::{
 };
 
 use libc::pid_t;
-use objc2::{
-    declare_class, define_class, msg_send, msg_send_id,
-    rc::{Id, Retained},
-    runtime::AnyObject,
-    AnyThread, ClassType, DeclaredClass,
-};
+use objc2::{define_class, msg_send, rc::Retained, runtime::AnyObject, AnyThread};
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::{
     kAXTrustedCheckOptionPrompt, AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
@@ -27,30 +22,19 @@ use objc2_core_foundation::{
 };
 use objc2_foundation::{
     ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
-    NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSObjectNSKeyValueObserving,
-    NSString,
+    NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSString,
 };
 
 use crate::{
     protocol::{WindowError, WindowEvent},
-    sys::platform::{
-        ffi::{CFRunLoopGetCurrent, CFRunLoopSourceSignal, CFRunLoopWakeUp},
-        ffi2::CFRetainedSafe,
-    },
+    sys::platform::ffi::CFRetainedSafe,
 };
 
+use self::application::WindowIterator;
 pub use self::{application::Application, window::Window};
-use self::{
-    application::WindowIterator,
-    ffi::{
-        CFRunLoopAddSource, CFRunLoopRunInMode, CFRunLoopSourceCreate, CFRunLoopSourceRef,
-        CGWindowID,
-    },
-};
 
 mod application;
 mod ffi;
-mod ffi2;
 mod window;
 
 const TIMEOUT_STEPS: u32 = 10;
@@ -423,10 +407,6 @@ pub struct AppWatcher {
     inner: Retained<AppWatcherInner>,
     context: Box<Context>,
     receiver: Receiver<AppEvent>,
-}
-
-unsafe extern "C" fn test(info: *mut ::std::os::raw::c_void) {
-    println!("signaled");
 }
 
 impl AppWatcher {
