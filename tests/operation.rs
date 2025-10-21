@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use fowin_test_lib::{
     executor::{FowinExecutor, WinitExecutor},
-    Action, Mutation, Position, State, Step, Timeline,
+    Action, Mutation, Position, Size, State, Step, Timeline,
 };
 
 #[macro_use]
@@ -43,29 +43,31 @@ fn test_title() -> Result<(), String> {
 //       so validation fails, need to handle this inconsistency in fowin
 // #[test]
 // fn test_size() -> Result<(), String> {
-//     FowinExecutor::new()
-//         .execute_all(
-//             &mut WinitExecutor::new(),
-//             Timeline::new(vec![
-//                 Step::external(1, Action::Spawn(State::initial())),
-//                 Step::external(
-//                     1,
-//                     Action::Mutate(Mutation::Size(Size {
-//                         width: 200.0,
-//                         height: 300.0,
-//                     })),
-//                 ),
-//                 // Step::external(
-//                 //     1,
-//                 //     Action::Mutate(Mutation::Size(Size {
-//                 //         width: 50.0,
-//                 //         height: 50.0,
-//                 //     })),
-//                 // ),
-//                 Step::external(1, Action::Terminate),
-//             ]),
-//         )
-//         .map_err(|err| err.to_string())
+//     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+//         FowinExecutor::new()
+//             .execute_all(
+//                 winit_executor,
+//                 Timeline::new(vec![
+//                     Step::external(1, Action::Spawn(State::initial())),
+//                     Step::external(
+//                         1,
+//                         Action::Mutate(Mutation::Size(Size {
+//                             width: 200.0,
+//                             height: 300.0,
+//                         })),
+//                     ),
+//                     // Step::external(
+//                     //     1,
+//                     //     Action::Mutate(Mutation::Size(Size {
+//                     //         width: 50.0,
+//                     //         height: 50.0,
+//                     //     })),
+//                     // ),
+//                     Step::external(1, Action::Terminate),
+//                 ]),
+//             )
+//             .map_err(|err| err.to_string())
+//     })
 // }
 
 #[test]
@@ -105,38 +107,36 @@ fn test_position() -> Result<(), String> {
 //     })
 // }
 
-// TODO: inconsistent results
-// #[test]
-// fn test_hide() -> Result<(), String> {
-//     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
-//         FowinExecutor::new()
-//             .execute_all(
-//                 winit_executor,
-//                 Timeline::new(vec![
-//                     Step::external(1, Action::Spawn(State::initial())),
-//                     Step::external(1, Action::Mutate(Mutation::Hide(true))),
-//                     Step::external(1, Action::Mutate(Mutation::Hide(false))),
-//                     Step::external(1, Action::Terminate),
-//                 ]),
-//             )
-//             .map_err(|err| err.to_string())
-//     })
-// }
+#[test]
+fn test_hide() -> Result<(), String> {
+    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+        FowinExecutor::new()
+            .execute_all(
+                winit_executor,
+                Timeline::new(vec![
+                    Step::external(1, Action::Spawn(State::initial())),
+                    Step::external(1, Action::Mutate(Mutation::Hide(true))),
+                    Step::external(1, Action::Mutate(Mutation::Hide(false))),
+                    Step::external(1, Action::Terminate),
+                ]),
+            )
+            .map_err(|err| err.to_string())
+    })
+}
 
-// TODO: inconsistent results
-// #[test]
-// fn test_minimize() -> Result<(), String> {
-//     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
-//         FowinExecutor::new()
-//             .execute_all(
-//                 winit_executor,
-//                 Timeline::new(vec![
-//                     Step::external(1, Action::Spawn(State::initial())),
-//                     Step::external(1, Action::Mutate(Mutation::Minimize(true))),
-//                     Step::external(1, Action::Mutate(Mutation::Minimize(false))),
-//                     Step::external(1, Action::Terminate),
-//                 ]),
-//             )
-//             .map_err(|err| err.to_string())
-//     })
-// }
+#[test]
+fn test_minimize() -> Result<(), String> {
+    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+        FowinExecutor::new()
+            .execute_all(
+                winit_executor,
+                Timeline::new(vec![
+                    Step::external(1, Action::Spawn(State::initial())),
+                    Step::external(1, Action::Mutate(Mutation::Minimize(true))),
+                    Step::external(1, Action::Mutate(Mutation::Minimize(false))),
+                    Step::external(1, Action::Terminate),
+                ]),
+            )
+            .map_err(|err| err.to_string())
+    })
+}

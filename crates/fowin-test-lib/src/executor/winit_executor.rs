@@ -1,12 +1,13 @@
 use std::{
     collections::HashMap,
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
+    event::{DeviceEvent, DeviceId, StartCause},
     event_loop::{ActiveEventLoop, EventLoop},
     platform::pump_events::EventLoopExtPumpEvents,
     window::{Fullscreen, Window},
@@ -81,11 +82,16 @@ impl Executor for WinitExecutor {
         //       maybe if a test fails we can rerun it with longer delay? Can we listen
         //       to events and proceed after a timeout or when they respond? I found that
         //       anything less than 2ms and it frequently fails.
-        std::thread::sleep(Duration::from_millis(3));
+        // std::thread::sleep(Duration::from_millis(1000));
 
-        // Apply the new changes caused by the event.
-        self.event_loop
-            .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        // Apply the new changes caused by the event. This is quite the hack but it works
+        // quite well. Ideally we'd yield until the event is fully applied, but I don't
+        // believe that's possible.
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(10) {
+            self.event_loop
+                .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        }
 
         Ok(())
     }
@@ -244,5 +250,6 @@ impl ApplicationHandler<Step> for App {
         _window_id: winit::window::WindowId,
         _event: winit::event::WindowEvent,
     ) {
+        // println!("EVENT: {:?}", _event);
     }
 }
