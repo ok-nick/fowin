@@ -70,7 +70,7 @@ impl FowinExecutor {
 
                     println!("VALIDATING 1");
                     self.validate(step.id, &mutation)?;
-                    // println!("VALIDATING 2");
+                    println!("VALIDATING 2");
                     executor.validate(step.id, &mutation)?;
                 }
             }

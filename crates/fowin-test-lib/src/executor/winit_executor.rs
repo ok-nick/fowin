@@ -119,9 +119,10 @@ impl WindowProps for &Window {
     }
 
     fn position(&self) -> Result<Position, ExecutionError> {
-        let position = self.outer_position().map_err(|_| {
-            ExecutionError::UnsupportedOperation("winit window position".to_owned())
-        })?;
+        let position = self
+            .outer_position()
+            .map_err(|_| ExecutionError::UnsupportedOperation("winit window position".to_owned()))?
+            .to_logical::<i32>(self.scale_factor());
         Ok(Position {
             x: position.x.into(),
             y: position.y.into(),
