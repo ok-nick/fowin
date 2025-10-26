@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use fowin::WindowError;
 use fowin_test_lib::{
     executor::{FowinExecutor, WinitExecutor},
     Action, Mutation, Position, Size, State, Step, Timeline,
@@ -19,6 +20,10 @@ thread_local! {
 //
 //       relevant issue: https://github.com/rust-lang/rust/issues/104053
 fn main() {
+    if !fowin::request_trust().unwrap() {
+        panic!("{}", WindowError::NotTrusted);
+    }
+
     libtest_mimic_collect::TestCollection::run();
 }
 
