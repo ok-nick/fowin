@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     ffi::c_void,
     iter::{self, Once},
+    marker::PhantomData,
     ptr,
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, ThreadId},
@@ -70,11 +71,12 @@ pub struct Watcher {
     receiver: Receiver<Result<WindowEvent, WindowError>>,
     watchers: HashMap<pid_t, WatcherState>,
     thread_id: ThreadId,
+    // TODO: can I use a main thread marker here or main thread bound?
+    // NOTE: replace with negative_impls when stabilized
+    //       https://github.com/rust-lang/rust/issues/68318
+    // The run loop must be ran on the thread the watchers are created.
+    _not_send_sync: PhantomData<*const ()>,
 }
-
-// The run loop must be ran on the thread the watchers are created.
-impl !Send for Watcher {}
-impl !Sync for Watcher {}
 
 impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
@@ -100,6 +102,7 @@ impl Watcher {
             receiver,
             watchers: HashMap::new(),
             thread_id: thread::current().id(),
+            _not_send_sync: PhantomData,
         })
     }
 

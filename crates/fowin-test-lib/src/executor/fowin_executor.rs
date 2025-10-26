@@ -46,7 +46,7 @@ impl FowinExecutor {
             }
 
             // std::thread::sleep(std::time::Duration::from_secs(3));
-            println!("VALIDATING");
+            // println!("VALIDATING");
 
             match step.action {
                 // If it's terminated, there's nothing to validate.
