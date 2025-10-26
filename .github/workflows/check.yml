@@ -1,0 +1,50 @@
+name: check
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/check.yml"
+  pull_request:
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/check.yml"
+
+jobs:
+  lint:
+    # TODO: temp disable until lints are cleaned up
+    if: ${{ false }}
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
