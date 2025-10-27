@@ -506,7 +506,6 @@ impl Iterator for WindowIteratorOrErr {
 impl From<AXError> for WindowError {
     // https://developer.apple.com/documentation/applicationservices/axerror?language=objc
     fn from(value: AXError) -> Self {
-        println!("{:?}", value);
         match value {
             AXError::APIDisabled => WindowError::NotTrusted,
             AXError::IllegalArgument => WindowError::InvalidInternalArgument,
