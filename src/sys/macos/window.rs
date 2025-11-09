@@ -1,4 +1,5 @@
 use std::{
+    ffi,
     mem::MaybeUninit,
     ptr::{self, NonNull},
 };
@@ -133,26 +134,38 @@ impl Window {
 
     // TODO: this sets the inner window wsize (excluding title bar)
     pub fn resize(&self, size: Size) -> Result<(), WindowError> {
+        let size = unsafe {
+            AXValue::new(
+                AXValueType::CGSize,
+                NonNull::new_unchecked(
+                    &mut CGSize::new(size.width, size.height) as *mut CGSize as *mut ffi::c_void
+                ),
+            )
+            .unwrap()
+        };
+
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXSizeAttribute),
-            // TODO: fixed in next release?
-            // https://github.com/madsmtm/objc2/issues/777#issuecomment-3193276002
-            unsafe {
-                &*((&CGSize::new(size.width, size.height) as *const CGSize).cast::<CFType>())
-            },
+            &size,
         )
     }
 
     pub fn reposition(&self, position: Position) -> Result<(), WindowError> {
+        let position = unsafe {
+            AXValue::new(
+                AXValueType::CGPoint,
+                NonNull::new_unchecked(
+                    &mut CGPoint::new(position.x, position.y) as *mut CGPoint as *mut ffi::c_void
+                ),
+            )
+            .unwrap()
+        };
+
         Self::set_value_for_attribute(
             &self.inner,
             &CFString::from_static_str(kAXPositionAttribute),
-            // TODO: fixed in next release?
-            // https://github.com/madsmtm/objc2/issues/777#issuecomment-3193276002
-            unsafe {
-                &*((&CGPoint::new(position.x, position.y) as *const CGPoint).cast::<CFType>())
-            },
+            &position,
         )
     }
 
