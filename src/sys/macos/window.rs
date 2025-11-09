@@ -39,7 +39,6 @@ pub struct Window {
 }
 
 // TODO: create a trait for this
-// TODO: reduce boilerplate between some of these methods
 impl Window {
     // TODO: add timeouts like for applications
     pub(super) fn new(
@@ -111,7 +110,6 @@ impl Window {
         }
     }
 
-    // TODO: when fullscreening then unfullscreening a window it still returns true
     pub fn is_fullscreen(&self) -> Result<bool, WindowError> {
         Self::bool_for_attribute(
             &self.inner,

@@ -7,7 +7,6 @@ use std::{
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::{DeviceEvent, DeviceId, StartCause},
     event_loop::{ActiveEventLoop, EventLoop},
     platform::pump_events::EventLoopExtPumpEvents,
     window::{Fullscreen, Window},
@@ -16,7 +15,7 @@ use winit::{
 use crate::{
     executor::{encode_title, ExecutionError, Executor, WindowProps},
     state::Mutation,
-    timeline::{Action, Step},
+    timeline::{Action, ExecScope, Step},
     Position, Size,
 };
 
@@ -66,6 +65,9 @@ impl Default for WinitExecutor {
 impl Executor for WinitExecutor {
     // In a LocalExecutor, everything runs in the local program, so we don't need to map
     // window ids to separate processes as in the case of the BinaryExecutor.
+    //
+    // Note that we ignore the ExecScope here because we want to pump app events even if
+    // fowin executes a window operation so that they apply immediately.
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
         // Send the new user event.
         self.event_loop
@@ -234,7 +236,7 @@ impl ApplicationHandler<Step> for App {
                     //       be a private API that can be used in fowin to detect hidden windows, although not too ideal
                     Mutation::Hide(hidden) => window.set_minimized(hidden),
                     Mutation::Minimize(minimized) => window.set_minimized(minimized),
-                    // TODO: same as focus window?
+                    // TODO: same as focus window? there isn't a way to query if the window is at the front.
                     Mutation::BringToFront => todo!(),
                     Mutation::Focus => window.focus_window(),
                     Mutation::Title(title) => {
