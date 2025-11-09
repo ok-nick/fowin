@@ -44,36 +44,34 @@ fn test_title() -> Result<(), String> {
     })
 }
 
-// TODO: unfortunately macos returns the window content size + the tilte bar size
-//       so validation fails, need to handle this inconsistency in fowin
-// #[test]
-// fn test_size() -> Result<(), String> {
-//     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
-//         FowinExecutor::new()
-//             .execute_all(
-//                 winit_executor,
-//                 Timeline::new(vec![
-//                     Step::external(1, Action::Spawn(State::initial())),
-//                     Step::external(
-//                         1,
-//                         Action::Mutate(Mutation::Size(Size {
-//                             width: 200.0,
-//                             height: 300.0,
-//                         })),
-//                     ),
-//                     // Step::external(
-//                     //     1,
-//                     //     Action::Mutate(Mutation::Size(Size {
-//                     //         width: 50.0,
-//                     //         height: 50.0,
-//                     //     })),
-//                     // ),
-//                     Step::external(1, Action::Terminate),
-//                 ]),
-//             )
-//             .map_err(|err| err.to_string())
-//     })
-// }
+#[test]
+fn test_size() -> Result<(), String> {
+    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+        FowinExecutor::new()
+            .execute_all(
+                winit_executor,
+                Timeline::new(vec![
+                    Step::external(1, Action::Spawn(State::initial())),
+                    Step::external(
+                        1,
+                        Action::Mutate(Mutation::Size(Size {
+                            width: 200.0,
+                            height: 300.0,
+                        })),
+                    ),
+                    Step::external(
+                        1,
+                        Action::Mutate(Mutation::Size(Size {
+                            width: 50.0,
+                            height: 50.0,
+                        })),
+                    ),
+                    Step::external(1, Action::Terminate),
+                ]),
+            )
+            .map_err(|err| err.to_string())
+    })
+}
 
 #[test]
 fn test_position() -> Result<(), String> {
@@ -94,7 +92,7 @@ fn test_position() -> Result<(), String> {
     })
 }
 
-// TODO: broken, when unfullscreening fowin reports it a s fullscreened
+// TODO: default fullscreen transition on macos takes a while, winit doesn't seem to provide a mechanism to detect when it's complete
 // #[test]
 // fn test_fullscreen() -> Result<(), String> {
 //     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {

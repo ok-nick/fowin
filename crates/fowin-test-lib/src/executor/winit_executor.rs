@@ -88,7 +88,7 @@ impl Executor for WinitExecutor {
         // quite well. Ideally we'd yield until the event is fully applied, but I don't
         // believe that's possible.
         let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(10) {
+        while start.elapsed() < Duration::from_millis(1000) {
             self.event_loop
                 .pump_app_events(Some(Duration::ZERO), &mut self.app);
         }
@@ -111,7 +111,7 @@ impl WindowProps for &Window {
 
     // TODO: handle physical/logical size consistency
     fn size(&self) -> Result<Size, ExecutionError> {
-        let size = self.outer_size();
+        let size = self.outer_size().to_logical::<i32>(self.scale_factor());
         Ok(Size {
             width: size.width.into(),
             height: size.height.into(),
@@ -130,12 +130,7 @@ impl WindowProps for &Window {
     }
 
     fn is_fullscreen(&self) -> Result<bool, ExecutionError> {
-        let fullscreen = self
-            .fullscreen()
-            .ok_or(ExecutionError::UnsupportedOperation(
-                "winit fullscreen".to_owned(),
-            ))?;
-        Ok(matches!(fullscreen, Fullscreen::Borderless(_)))
+        Ok(self.fullscreen().is_some())
     }
 
     fn is_hidden(&self) -> Result<bool, ExecutionError> {
@@ -212,9 +207,17 @@ impl ApplicationHandler<Step> for App {
                 let window = self.windows.get_mut(&step.id).unwrap();
                 match mutation {
                     Mutation::Size(size) => {
+                        // The macOS accessibility API (used in fowin) does two interesting things:
+                        // 1. Includes the title bar size when getting and setting the window size.
+                        // 2. Sets and gets logical sizes rather than physical.
+                        let scale_factor = window.scale_factor();
+                        let title_bar_size =
+                            window.outer_size().to_logical::<f64>(scale_factor).height
+                                - window.inner_size().to_logical::<f64>(scale_factor).height;
+
                         let _ = window.request_inner_size(LogicalSize {
                             width: size.width,
-                            height: size.height,
+                            height: size.height - title_bar_size,
                         });
                     }
                     Mutation::Position(position) => window.set_outer_position(LogicalPosition {
