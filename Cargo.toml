@@ -64,6 +64,11 @@ fowin-test-lib = { path = "crates/fowin-test-lib" }
 libtest-mimic-collect = "0.3.2"
 
 [[test]]
-name = "operation"
-path = "tests/operation.rs"
+name = "window_read"
+path = "tests/window_read.rs"
+harness = false
+
+[[test]]
+name = "window_write"
+path = "tests/window_write.rs"
 harness = false

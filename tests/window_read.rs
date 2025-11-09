@@ -1,35 +1,17 @@
-use std::cell::RefCell;
-
-use fowin::WindowError;
 use fowin_test_lib::{
-    executor::{FowinExecutor, WinitExecutor},
-    Action, Mutation, Position, Size, State, Step, Timeline,
+    executor::FowinExecutor, Action, Mutation, Position, Size, State, Step, Timeline,
 };
+
+mod common;
 
 #[macro_use]
 extern crate libtest_mimic_collect;
 
-// `winit` event loops cannot be created more than once, thus we cache it here.
-thread_local! {
-    static WINNIT_EXECUTOR: RefCell<WinitExecutor> = RefCell::new(WinitExecutor::new());
-}
-
-// NOTE: on macOS, these tests MUST run on the main (UI) thread. Unfortunately, it's no longer possible to do
-//       with cargo test, so we use libtest_mimic and libtest_mimic_collect for the macros. Note that
-//       --test-threads=1 must be passed to run on the main thread.
-//
-//       relevant issue: https://github.com/rust-lang/rust/issues/104053
-fn main() {
-    if !fowin::request_trust().unwrap() {
-        panic!("{}", WindowError::NotTrusted);
-    }
-
-    libtest_mimic_collect::TestCollection::run();
-}
+init_windowing!();
 
 #[test]
-fn test_title() -> Result<(), String> {
-    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+fn test_read_title() -> Result<(), String> {
+    WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
                 winit_executor,
@@ -45,8 +27,8 @@ fn test_title() -> Result<(), String> {
 }
 
 #[test]
-fn test_size() -> Result<(), String> {
-    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+fn test_read_size() -> Result<(), String> {
+    WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
                 winit_executor,
@@ -74,8 +56,8 @@ fn test_size() -> Result<(), String> {
 }
 
 #[test]
-fn test_position() -> Result<(), String> {
-    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+fn test_read_position() -> Result<(), String> {
+    WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
                 winit_executor,
@@ -93,9 +75,10 @@ fn test_position() -> Result<(), String> {
 }
 
 // TODO: default fullscreen transition on macos takes a while, winit doesn't seem to provide a mechanism to detect when it's complete
+//       see https://github.com/rust-windowing/winit/issues/2334
 // #[test]
-// fn test_fullscreen() -> Result<(), String> {
-//     WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+// fn test_read_fullscreen() -> Result<(), String> {
+//     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
 //         FowinExecutor::new()
 //             .execute_all(
 //                 winit_executor,
@@ -111,8 +94,8 @@ fn test_position() -> Result<(), String> {
 // }
 
 #[test]
-fn test_hide() -> Result<(), String> {
-    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+fn test_read_hide() -> Result<(), String> {
+    WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
                 winit_executor,
@@ -128,8 +111,8 @@ fn test_hide() -> Result<(), String> {
 }
 
 #[test]
-fn test_minimize() -> Result<(), String> {
-    WINNIT_EXECUTOR.with_borrow_mut(|winit_executor| {
+fn test_read_minimize() -> Result<(), String> {
+    WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
                 winit_executor,
