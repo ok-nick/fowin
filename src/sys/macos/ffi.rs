@@ -44,6 +44,7 @@ impl<T: Type> Clone for CFRetainedSafe<T> {
 }
 
 unsafe impl<T: Type> Send for CFRetainedSafe<T> {}
+unsafe impl<T: Type> Sync for CFRetainedSafe<T> {}
 
 impl<T: Type> Deref for CFRetainedSafe<T> {
     type Target = CFRetained<T>;
