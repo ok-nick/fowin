@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use fowin::Window;
+use log::{debug, info};
 
 use crate::{
     executor::{encode_title, ExecutionError, Executor, WindowProps},
@@ -34,19 +35,13 @@ impl FowinExecutor {
     ) -> Result<(), ExecutionError> {
         let mut states = HashMap::new();
         for step in timeline.into_steps() {
-            println!("SENT {:?}", step);
+            info!("FowinExecutor sending step: {:?}", step);
 
-            match step.scope {
-                ExecScope::Fowin => {
-                    self.execute(&step)?;
-                }
-                ExecScope::External => {
-                    executor.execute(&step)?;
-                }
-            }
+            self.execute(&step)?;
+            executor.execute(&step)?;
 
             // std::thread::sleep(std::time::Duration::from_secs(3));
-            println!("VALIDATING");
+            // println!("VALIDATING");
 
             match step.action {
                 // If it's terminated, there's nothing to validate.
@@ -68,9 +63,10 @@ impl FowinExecutor {
                         *title = encode_title(&self.namespace, step.id, title)
                     }
 
-                    println!("VALIDATING 1");
+                    debug!("FowinExecutor validating mutation: {:?}", mutation);
                     self.validate(step.id, &mutation)?;
-                    println!("VALIDATING 2");
+
+                    debug!("External executor validating mutation: {:?}", mutation);
                     executor.validate(step.id, &mutation)?;
                 }
             }
@@ -105,59 +101,63 @@ impl FowinExecutor {
 
 impl Executor for FowinExecutor {
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
-        match &step.action {
-            Action::Mutate(mutation) => {
-                let window = self.windows.get(&step.id).unwrap();
-                match mutation {
-                    Mutation::Title(_) => Err(ExecutionError::UnsupportedOperation(
-                        "fowin set title".to_owned(),
-                    )),
-                    Mutation::Size(size) => {
-                        window.resize((*size).into())?;
-                        Ok(())
-                    }
-                    Mutation::Position(position) => {
-                        window.reposition((*position).into())?;
-                        Ok(())
-                    }
-                    Mutation::Fullscreen(fullscreen) => {
-                        match fullscreen {
-                            true => window.fullscreen()?,
-                            false => window.unfullscreen()?,
+        if let ExecScope::Fowin = step.scope {
+            match &step.action {
+                Action::Mutate(mutation) => {
+                    let window = self.windows.get(&step.id).unwrap();
+                    match mutation {
+                        Mutation::Title(_) => Err(ExecutionError::UnsupportedOperation(
+                            "fowin set title".to_owned(),
+                        )),
+                        Mutation::Size(size) => {
+                            window.resize((*size).into())?;
+                            Ok(())
                         }
-                        Ok(())
-                    }
-                    Mutation::Hide(hidden) => {
-                        match hidden {
-                            true => window.hide()?,
-                            false => window.show()?,
+                        Mutation::Position(position) => {
+                            window.reposition((*position).into())?;
+                            Ok(())
                         }
-                        Ok(())
-                    }
-                    Mutation::Minimize(minimize) => {
-                        match minimize {
-                            true => window.minimize()?,
-                            false => window.unminimize()?,
+                        Mutation::Fullscreen(fullscreen) => {
+                            match fullscreen {
+                                true => window.fullscreen()?,
+                                false => window.unfullscreen()?,
+                            }
+                            Ok(())
                         }
-                        Ok(())
-                    }
-                    Mutation::BringToFront => {
-                        window.bring_to_front()?;
-                        Ok(())
-                    }
-                    Mutation::Focus => {
-                        window.focus()?;
-                        Ok(())
+                        Mutation::Hide(hidden) => {
+                            match hidden {
+                                true => window.hide()?,
+                                false => window.show()?,
+                            }
+                            Ok(())
+                        }
+                        Mutation::Minimize(minimize) => {
+                            match minimize {
+                                true => window.minimize()?,
+                                false => window.unminimize()?,
+                            }
+                            Ok(())
+                        }
+                        Mutation::BringToFront => {
+                            window.bring_to_front()?;
+                            Ok(())
+                        }
+                        Mutation::Focus => {
+                            window.focus()?;
+                            Ok(())
+                        }
                     }
                 }
+                Action::Spawn(_) => Err(ExecutionError::UnsupportedOperation(
+                    "fowin spawn window".to_owned(),
+                )),
+                // TODO: I believe this can be done on macos via kAXCloseButtonAttribute and kAXPressButton
+                Action::Terminate => Err(ExecutionError::UnsupportedOperation(
+                    "fowin terminate window".to_owned(),
+                )),
             }
-            Action::Spawn(_) => Err(ExecutionError::UnsupportedOperation(
-                "fowin spawn window".to_owned(),
-            )),
-            // TODO: I believe this can be done on macos via kAXCloseButtonAttribute and kAXPressButton
-            Action::Terminate => Err(ExecutionError::UnsupportedOperation(
-                "fowin terminate window".to_owned(),
-            )),
+        } else {
+            Ok(())
         }
     }
 

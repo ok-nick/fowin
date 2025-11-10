@@ -1,21 +1,23 @@
 use std::{
     collections::HashMap,
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use log::{debug, info};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
     platform::pump_events::EventLoopExtPumpEvents,
-    window::{Fullscreen, Window},
+    window::{Fullscreen, Window, WindowId},
 };
 
 use crate::{
     executor::{encode_title, ExecutionError, Executor, WindowProps},
     state::Mutation,
-    timeline::{Action, Step},
+    timeline::{Action, ExecScope, Step},
     Position, Size,
 };
 
@@ -65,27 +67,43 @@ impl Default for WinitExecutor {
 impl Executor for WinitExecutor {
     // In a LocalExecutor, everything runs in the local program, so we don't need to map
     // window ids to separate processes as in the case of the BinaryExecutor.
+    //
+    // Note that we ignore the ExecScope here because we want to pump app events even if
+    // fowin executes a window operation so that they apply immediately.
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
-        // Send the new user event.
-        self.event_loop
-            .create_proxy()
-            .send_event(step.to_owned())
-            .unwrap();
-        self.event_loop
-            .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        if let ExecScope::External = step.scope {
+            // self.receiver.try_iter().for_each(drop);
+            debug!("WinitExecutor executing step: {:?}", step);
 
-        self.receiver.recv().unwrap();
+            // Send the new user event.
+            self.event_loop
+                .create_proxy()
+                .send_event(step.to_owned())
+                .unwrap();
+
+            self.event_loop
+                .pump_app_events(Some(Duration::ZERO), &mut self.app);
+
+            self.receiver.recv().unwrap();
+
+            debug!("WinitExecutor finished executing step: {:?}", step);
+        }
 
         // TODO: doesn't work properly without this. I wonder if it would be
         //       better if we had a continuous run loop? What's a reliable number to wait?
         //       maybe if a test fails we can rerun it with longer delay? Can we listen
         //       to events and proceed after a timeout or when they respond? I found that
         //       anything less than 2ms and it frequently fails.
-        std::thread::sleep(Duration::from_millis(3));
+        // std::thread::sleep(Duration::from_millis(1000));
 
-        // Apply the new changes caused by the event.
-        self.event_loop
-            .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        // Apply the new changes caused by the event. This is quite the hack but it works
+        // quite well. Ideally we'd yield until the event is fully applied, but I don't
+        // believe that's possible.
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(10) {
+            self.event_loop
+                .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        }
 
         Ok(())
     }
@@ -105,7 +123,7 @@ impl WindowProps for &Window {
 
     // TODO: handle physical/logical size consistency
     fn size(&self) -> Result<Size, ExecutionError> {
-        let size = self.outer_size();
+        let size = self.outer_size().to_logical::<i32>(self.scale_factor());
         Ok(Size {
             width: size.width.into(),
             height: size.height.into(),
@@ -113,9 +131,10 @@ impl WindowProps for &Window {
     }
 
     fn position(&self) -> Result<Position, ExecutionError> {
-        let position = self.outer_position().map_err(|_| {
-            ExecutionError::UnsupportedOperation("winit window position".to_owned())
-        })?;
+        let position = self
+            .outer_position()
+            .map_err(|_| ExecutionError::UnsupportedOperation("winit window position".to_owned()))?
+            .to_logical::<i32>(self.scale_factor());
         Ok(Position {
             x: position.x.into(),
             y: position.y.into(),
@@ -123,16 +142,10 @@ impl WindowProps for &Window {
     }
 
     fn is_fullscreen(&self) -> Result<bool, ExecutionError> {
-        let fullscreen = self
-            .fullscreen()
-            .ok_or(ExecutionError::UnsupportedOperation(
-                "winit fullscreen".to_owned(),
-            ))?;
-        Ok(matches!(fullscreen, Fullscreen::Borderless(_)))
+        Ok(self.fullscreen().is_some())
     }
 
     fn is_hidden(&self) -> Result<bool, ExecutionError> {
-        println!("{:?}", self.is_visible());
         self.is_visible()
             .map(|visible| !visible)
             .ok_or(ExecutionError::UnsupportedOperation(
@@ -168,10 +181,11 @@ impl ApplicationHandler<Step> for App {
 
     // TODO: some events like request_inner_size are queued and the channel shouldn't be returned
     //       until we know it's been executed
+    //       same with fullscreening, which takes time to transition
     fn user_event(&mut self, event_loop: &ActiveEventLoop, step: Step) {
-        println!("RECEIVED {:?}", step);
+        debug!("WinitExecutor received step: {:?}", step);
 
-        match step.action {
+        match &step.action {
             Action::Spawn(state) => {
                 let window = event_loop
                     .create_window(
@@ -205,9 +219,17 @@ impl ApplicationHandler<Step> for App {
                 let window = self.windows.get_mut(&step.id).unwrap();
                 match mutation {
                     Mutation::Size(size) => {
+                        // The macOS accessibility API (used in fowin) does two interesting things:
+                        // 1. Includes the title bar size when getting and setting the window size.
+                        // 2. Sets and gets logical sizes rather than physical.
+                        let scale_factor = window.scale_factor();
+                        let title_bar_size =
+                            window.outer_size().to_logical::<f64>(scale_factor).height
+                                - window.inner_size().to_logical::<f64>(scale_factor).height;
+
                         let _ = window.request_inner_size(LogicalSize {
                             width: size.width,
-                            height: size.height,
+                            height: size.height - title_bar_size,
                         });
                     }
                     Mutation::Position(position) => window.set_outer_position(LogicalPosition {
@@ -222,27 +244,34 @@ impl ApplicationHandler<Step> for App {
                     //       macOS invalid. Therefore we must use another method of hiding a window (currently minimizing)
                     //       although not a huge fan. Aerospace moves windows to the bottom right corner. There may also
                     //       be a private API that can be used in fowin to detect hidden windows, although not too ideal
-                    Mutation::Hide(hidden) => window.set_minimized(hidden),
-                    Mutation::Minimize(minimized) => window.set_minimized(minimized),
-                    // TODO: same as focus window?
+                    Mutation::Hide(hidden) => window.set_minimized(*hidden),
+                    Mutation::Minimize(minimized) => window.set_minimized(*minimized),
+                    // TODO: same as focus window? there isn't a way to query if the window is at the front.
                     Mutation::BringToFront => todo!(),
                     Mutation::Focus => window.focus_window(),
                     Mutation::Title(title) => {
-                        window.set_title(&encode_title(&self.namespace, step.id, &title))
+                        window.set_title(&encode_title(&self.namespace, step.id, title))
                     }
                 }
             }
         }
 
+        // if !matches!(&step.action, Action::Mutate(Mutation::Size(..))) {
         // Alert that we finished running the step.
         self.sender.send(()).unwrap();
+        // }
     }
 
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        _event: winit::event::WindowEvent,
+        _window_id: WindowId,
+        event: WindowEvent,
     ) {
+        debug!("WinitExecutor received window event: {:?}", event);
+
+        // if let WindowEvent::Resized(..) = event {
+        // self.sender.send(()).unwrap();
+        // }
     }
 }
