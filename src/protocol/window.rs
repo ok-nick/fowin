@@ -154,12 +154,12 @@ mod tests {
     fn needs_sync<T: Sync>() {}
 
     #[test]
-    fn test_window_send() {
+    fn window_send() {
         needs_send::<Window>();
     }
 
     #[test]
-    fn test_window_sync() {
+    fn window_sync() {
         needs_sync::<Window>();
     }
 }

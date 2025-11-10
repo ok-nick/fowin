@@ -10,7 +10,7 @@ extern crate libtest_mimic_collect;
 init_windowing!();
 
 #[test]
-fn test_read_title() -> Result<(), String> {
+fn read_title() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -26,7 +26,7 @@ fn test_read_title() -> Result<(), String> {
 }
 
 #[test]
-fn test_read_size() -> Result<(), String> {
+fn read_size() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -48,7 +48,7 @@ fn test_read_size() -> Result<(), String> {
 }
 
 #[test]
-fn test_read_position() -> Result<(), String> {
+fn read_position() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -69,7 +69,7 @@ fn test_read_position() -> Result<(), String> {
 // TODO: default fullscreen transition on macos takes a while, winit doesn't seem to provide a mechanism to detect when it's complete
 //       see https://github.com/rust-windowing/winit/issues/2334
 // #[test]
-// fn test_read_fullscreen() -> Result<(), String> {
+// fn read_fullscreen() -> Result<(), String> {
 //     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
 //         FowinExecutor::new()
 //             .execute_all(
@@ -86,7 +86,7 @@ fn test_read_position() -> Result<(), String> {
 // }
 
 #[test]
-fn test_read_hide() -> Result<(), String> {
+fn read_hide() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -103,7 +103,7 @@ fn test_read_hide() -> Result<(), String> {
 }
 
 #[test]
-fn test_read_minimize() -> Result<(), String> {
+fn read_minimize() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(

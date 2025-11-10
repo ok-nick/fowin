@@ -10,7 +10,7 @@ extern crate libtest_mimic_collect;
 init_windowing!();
 
 #[test]
-fn test_write_size() -> Result<(), String> {
+fn write_size() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -32,7 +32,7 @@ fn test_write_size() -> Result<(), String> {
 }
 
 // #[test]
-// fn test_write_fullscreen() -> Result<(), String> {
+// fn write_fullscreen() -> Result<(), String> {
 //     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
 //         FowinExecutor::new()
 //             .execute_all(
@@ -49,7 +49,7 @@ fn test_write_size() -> Result<(), String> {
 // }
 
 #[test]
-fn test_write_position() -> Result<(), String> {
+fn write_position() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -65,7 +65,7 @@ fn test_write_position() -> Result<(), String> {
 }
 
 #[test]
-fn test_write_hide() -> Result<(), String> {
+fn write_hide() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
@@ -82,7 +82,7 @@ fn test_write_hide() -> Result<(), String> {
 }
 
 #[test]
-fn test_write_minimize() -> Result<(), String> {
+fn write_minimize() -> Result<(), String> {
     WINIT_EXECUTOR.with_borrow_mut(|winit_executor| {
         FowinExecutor::new()
             .execute_all(
