@@ -4,6 +4,7 @@ use std::{
 };
 
 use fowin::WindowError;
+use log::info;
 
 use crate::{state::Mutation, timeline::Step, Position, Size};
 #[cfg(feature = "binary_executor")]

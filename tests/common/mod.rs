@@ -13,6 +13,8 @@ macro_rules! init_windowing {
         //
         //       relevant issue: https://github.com/rust-lang/rust/issues/104053
         fn main() {
+            env_logger::init();
+
             if !::fowin::request_trust().unwrap() {
                 panic!("{}", ::fowin::WindowError::NotTrusted);
             }

@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use log::{debug, info};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
@@ -72,7 +73,7 @@ impl Executor for WinitExecutor {
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
         if let ExecScope::External = step.scope {
             // self.receiver.try_iter().for_each(drop);
-            println!("STARTED");
+            debug!("WinitExecutor executing step: {:?}", step);
 
             // Send the new user event.
             self.event_loop
@@ -83,8 +84,9 @@ impl Executor for WinitExecutor {
             self.event_loop
                 .pump_app_events(Some(Duration::ZERO), &mut self.app);
 
-            println!("PENDING");
             self.receiver.recv().unwrap();
+
+            debug!("WinitExecutor finished executing step: {:?}", step);
         }
 
         // TODO: doesn't work properly without this. I wonder if it would be
@@ -144,7 +146,6 @@ impl WindowProps for &Window {
     }
 
     fn is_hidden(&self) -> Result<bool, ExecutionError> {
-        println!("{:?}", self.is_visible());
         self.is_visible()
             .map(|visible| !visible)
             .ok_or(ExecutionError::UnsupportedOperation(
@@ -182,7 +183,7 @@ impl ApplicationHandler<Step> for App {
     //       until we know it's been executed
     //       same with fullscreening, which takes time to transition
     fn user_event(&mut self, event_loop: &ActiveEventLoop, step: Step) {
-        println!("RECEIVED {:?}", step);
+        debug!("WinitExecutor received step: {:?}", step);
 
         match &step.action {
             Action::Spawn(state) => {
@@ -226,11 +227,10 @@ impl ApplicationHandler<Step> for App {
                             window.outer_size().to_logical::<f64>(scale_factor).height
                                 - window.inner_size().to_logical::<f64>(scale_factor).height;
 
-                        let result = window.request_inner_size(LogicalSize {
+                        let _ = window.request_inner_size(LogicalSize {
                             width: size.width,
                             height: size.height - title_bar_size,
                         });
-                        println!("RESULT IS {:?}", result);
                     }
                     Mutation::Position(position) => window.set_outer_position(LogicalPosition {
                         x: position.x,
@@ -268,7 +268,7 @@ impl ApplicationHandler<Step> for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        println!("EVENT: {:?}", event);
+        debug!("WinitExecutor received window event: {:?}", event);
 
         // if let WindowEvent::Resized(..) = event {
         // self.sender.send(()).unwrap();

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use fowin::Window;
+use log::{debug, info};
 
 use crate::{
     executor::{encode_title, ExecutionError, Executor, WindowProps},
@@ -34,7 +35,7 @@ impl FowinExecutor {
     ) -> Result<(), ExecutionError> {
         let mut states = HashMap::new();
         for step in timeline.into_steps() {
-            println!("SENT {:?}", step);
+            info!("FowinExecutor sending step: {:?}", step);
 
             self.execute(&step)?;
             executor.execute(&step)?;
@@ -62,9 +63,10 @@ impl FowinExecutor {
                         *title = encode_title(&self.namespace, step.id, title)
                     }
 
-                    println!("VALIDATING 1");
+                    debug!("FowinExecutor validating mutation: {:?}", mutation);
                     self.validate(step.id, &mutation)?;
-                    println!("VALIDATING 2");
+
+                    debug!("External executor validating mutation: {:?}", mutation);
                     executor.validate(step.id, &mutation)?;
                 }
             }
