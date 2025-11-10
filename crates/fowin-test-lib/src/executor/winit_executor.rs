@@ -7,9 +7,10 @@ use std::{
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
     platform::pump_events::EventLoopExtPumpEvents,
-    window::{Fullscreen, Window},
+    window::{Fullscreen, Window, WindowId},
 };
 
 use crate::{
@@ -69,15 +70,22 @@ impl Executor for WinitExecutor {
     // Note that we ignore the ExecScope here because we want to pump app events even if
     // fowin executes a window operation so that they apply immediately.
     fn execute(&mut self, step: &Step) -> Result<(), ExecutionError> {
-        // Send the new user event.
-        self.event_loop
-            .create_proxy()
-            .send_event(step.to_owned())
-            .unwrap();
-        self.event_loop
-            .pump_app_events(Some(Duration::ZERO), &mut self.app);
+        if let ExecScope::External = step.scope {
+            // self.receiver.try_iter().for_each(drop);
+            println!("STARTED");
 
-        self.receiver.recv().unwrap();
+            // Send the new user event.
+            self.event_loop
+                .create_proxy()
+                .send_event(step.to_owned())
+                .unwrap();
+
+            self.event_loop
+                .pump_app_events(Some(Duration::ZERO), &mut self.app);
+
+            println!("PENDING");
+            self.receiver.recv().unwrap();
+        }
 
         // TODO: doesn't work properly without this. I wonder if it would be
         //       better if we had a continuous run loop? What's a reliable number to wait?
@@ -90,7 +98,7 @@ impl Executor for WinitExecutor {
         // quite well. Ideally we'd yield until the event is fully applied, but I don't
         // believe that's possible.
         let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(1000) {
+        while start.elapsed() < Duration::from_millis(10) {
             self.event_loop
                 .pump_app_events(Some(Duration::ZERO), &mut self.app);
         }
@@ -172,10 +180,11 @@ impl ApplicationHandler<Step> for App {
 
     // TODO: some events like request_inner_size are queued and the channel shouldn't be returned
     //       until we know it's been executed
+    //       same with fullscreening, which takes time to transition
     fn user_event(&mut self, event_loop: &ActiveEventLoop, step: Step) {
         println!("RECEIVED {:?}", step);
 
-        match step.action {
+        match &step.action {
             Action::Spawn(state) => {
                 let window = event_loop
                     .create_window(
@@ -217,10 +226,11 @@ impl ApplicationHandler<Step> for App {
                             window.outer_size().to_logical::<f64>(scale_factor).height
                                 - window.inner_size().to_logical::<f64>(scale_factor).height;
 
-                        let _ = window.request_inner_size(LogicalSize {
+                        let result = window.request_inner_size(LogicalSize {
                             width: size.width,
                             height: size.height - title_bar_size,
                         });
+                        println!("RESULT IS {:?}", result);
                     }
                     Mutation::Position(position) => window.set_outer_position(LogicalPosition {
                         x: position.x,
@@ -234,28 +244,34 @@ impl ApplicationHandler<Step> for App {
                     //       macOS invalid. Therefore we must use another method of hiding a window (currently minimizing)
                     //       although not a huge fan. Aerospace moves windows to the bottom right corner. There may also
                     //       be a private API that can be used in fowin to detect hidden windows, although not too ideal
-                    Mutation::Hide(hidden) => window.set_minimized(hidden),
-                    Mutation::Minimize(minimized) => window.set_minimized(minimized),
+                    Mutation::Hide(hidden) => window.set_minimized(*hidden),
+                    Mutation::Minimize(minimized) => window.set_minimized(*minimized),
                     // TODO: same as focus window? there isn't a way to query if the window is at the front.
                     Mutation::BringToFront => todo!(),
                     Mutation::Focus => window.focus_window(),
                     Mutation::Title(title) => {
-                        window.set_title(&encode_title(&self.namespace, step.id, &title))
+                        window.set_title(&encode_title(&self.namespace, step.id, title))
                     }
                 }
             }
         }
 
+        // if !matches!(&step.action, Action::Mutate(Mutation::Size(..))) {
         // Alert that we finished running the step.
         self.sender.send(()).unwrap();
+        // }
     }
 
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        _event: winit::event::WindowEvent,
+        _window_id: WindowId,
+        event: WindowEvent,
     ) {
-        // println!("EVENT: {:?}", _event);
+        println!("EVENT: {:?}", event);
+
+        // if let WindowEvent::Resized(..) = event {
+        // self.sender.send(()).unwrap();
+        // }
     }
 }

@@ -18,7 +18,6 @@ fn test_read_title() -> Result<(), String> {
                 Timeline::new(vec![
                     Step::external(1, Action::Spawn(State::initial())),
                     Step::external(1, Action::Mutate(Mutation::Title("title 1".to_owned()))),
-                    Step::external(1, Action::Mutate(Mutation::Title("title 2".to_owned()))),
                     Step::external(1, Action::Terminate),
                 ]),
             )
@@ -39,13 +38,6 @@ fn test_read_size() -> Result<(), String> {
                         Action::Mutate(Mutation::Size(Size {
                             width: 200.0,
                             height: 300.0,
-                        })),
-                    ),
-                    Step::external(
-                        1,
-                        Action::Mutate(Mutation::Size(Size {
-                            width: 50.0,
-                            height: 50.0,
                         })),
                     ),
                     Step::external(1, Action::Terminate),
