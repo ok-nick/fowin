@@ -8,7 +8,7 @@ mod window;
 
 // TODO: differentiate physical and logical pixels
 
-/// A posiiton with an x and y axis.
+/// A position with an x and y axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Position {
     /// The x position.

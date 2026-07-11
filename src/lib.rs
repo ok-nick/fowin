@@ -1,6 +1,3 @@
-#![feature(negative_impls)]
-#![feature(lazy_cell)]
-
 pub use protocol::{Position, Size, Window, WindowError, WindowEvent, WindowHandle};
 
 mod protocol;
@@ -8,12 +5,9 @@ mod sys;
 
 /// A handle that provides various methods for interacting with windows and window events.
 #[derive(Debug)]
-pub struct Watcher(sys::Watcher);
-
-// TODO: many backends (macos + windowws) must be called on the same thread it was created
-//       consider also doing runtime checks in the public API, ehhh??
-impl !Send for Watcher {}
-impl !Sync for Watcher {}
+pub struct Watcher {
+    inner: sys::Watcher,
+}
 
 impl Watcher {
     /// Watches for all window events.
@@ -24,7 +18,9 @@ impl Watcher {
     /// existing windows, call [`Watcher::iter_windows`](Watcher::iter_windows).
     #[inline]
     pub fn new() -> Result<Watcher, WindowError> {
-        Ok(Watcher(sys::Watcher::new()?))
+        Ok(Watcher {
+            inner: sys::Watcher::new()?,
+        })
     }
 
     /// Returns the next window event.
@@ -33,7 +29,7 @@ impl Watcher {
     /// a timestamp that can be used for ordering. Consider buffering events if order is important.
     #[inline]
     pub fn next_request(&mut self) -> Result<WindowEvent, WindowError> {
-        self.0.next_request()
+        self.inner.next_request()
     }
 }
 

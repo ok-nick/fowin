@@ -145,3 +145,21 @@ impl Window {
         self.0.bring_to_front()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn needs_send<T: Send>() {}
+    fn needs_sync<T: Sync>() {}
+
+    #[test]
+    fn window_send() {
+        needs_send::<Window>();
+    }
+
+    #[test]
+    fn window_sync() {
+        needs_sync::<Window>();
+    }
+}
