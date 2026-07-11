@@ -10,7 +10,8 @@ on:
 
 jobs:
   tests:
-    # TODO: temp until the kAXErrorNoValue problem is fixed
+    # TODO: all macOS tests return kAXErrorNoValue, likely because accessibility permissions
+    #       aren't granted and can't be granted on GitHub runners since SIP is enabled
     if: false
 
     runs-on: ${{ matrix.os }}
@@ -18,17 +19,20 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: add windows-latest when functional
-        # NOTE: `macos-13` has SIP disabled, which allows us to enable accessibility permissions.
-        os: [macos-13]
+        os: [macos-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      # TODO: for some reason all the tests return kAXErrorNoValue only on github action runners
-      - name: cargo test
-        # TODO: macos requires this to run on main thread, is this scalable?
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        # macOS requires the tests to run on the main thread
         run: cargo test --all-features --all-targets -- --test-threads 1
+
+      - name: cargo test
+        if: runner.os != 'macOS'
+        run: cargo test --all-features --all-targets
