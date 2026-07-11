@@ -11,7 +11,7 @@ use objc2_core_foundation::{kCFRunLoopDefaultMode, CFArray, CFRetained, CFRunLoo
 
 use crate::{
     protocol::{self, WindowError, WindowEvent},
-    sys::platform::ffi::{kAXFocusedWindowAttribute, CFRetainedSafe},
+    sys::platform::ffi::{self, kAXFocusedWindowAttribute, CFRetainedSafe},
 };
 
 use super::{
@@ -219,28 +219,30 @@ impl Watcher {
                     let info = Box::into_raw(Box::new(CallbackInfo {
                         sender: sender.clone(),
                         notification: match notification {
-                            kAXWindowCreatedNotification => {
+                            ffi::kAXWindowCreatedNotification => {
                                 Notification::Created(app.inner.clone())
                             }
-                            kAXFocusedWindowChangedNotification => {
+                            ffi::kAXFocusedWindowChangedNotification => {
                                 Notification::Focused(app.inner.clone())
                             }
-                            kAXApplicationActivatedNotification => {
+                            ffi::kAXApplicationActivatedNotification => {
                                 Notification::Activated(app.inner.clone())
                             }
-                            kAXMovedNotification => Notification::Moved(app.inner.clone()),
-                            kAXResizedNotification => Notification::Resized(app.inner.clone()),
-                            kAXTitleChangedNotification => Notification::Renamed(app.inner.clone()),
-                            kAXApplicationShownNotification => {
+                            ffi::kAXMovedNotification => Notification::Moved(app.inner.clone()),
+                            ffi::kAXResizedNotification => Notification::Resized(app.inner.clone()),
+                            ffi::kAXTitleChangedNotification => {
+                                Notification::Renamed(app.inner.clone())
+                            }
+                            ffi::kAXApplicationShownNotification => {
                                 Notification::Shown(app.inner.clone())
                             }
-                            kAXApplicationHiddenNotification => {
+                            ffi::kAXApplicationHiddenNotification => {
                                 Notification::Hidden(app.inner.clone())
                             }
-                            kAXWindowMiniaturizedNotification => {
+                            ffi::kAXWindowMiniaturizedNotification => {
                                 Notification::Miniaturized(app.inner.clone())
                             }
-                            kAXWindowDeminiaturizedNotification => {
+                            ffi::kAXWindowDeminiaturizedNotification => {
                                 Notification::Deminiaturized(app.inner.clone())
                             }
                             _ => unreachable!(),

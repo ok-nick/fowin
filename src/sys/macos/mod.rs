@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     collections::HashMap,
     ffi::c_void,
+    io,
     iter::{self, Once},
     marker::PhantomData,
     ptr,
@@ -254,7 +255,9 @@ pub fn request_trust() -> Result<bool, WindowError> {
     };
     match options {
         Some(options) => Ok(unsafe { AXIsProcessTrustedWithOptions(Some(&options)) }),
-        None => Err(WindowError::ArbitraryFailure),
+        None => Err(WindowError::OsError(io::Error::other(
+            "failed to create `CFDictionary` for accessibility trust options",
+        ))),
     }
 }
 
@@ -517,16 +520,19 @@ impl From<AXError> for WindowError {
             AXError::ParameterizedAttributeUnsupported => WindowError::Unsupported,
             AXError::ActionUnsupported => WindowError::Unsupported,
             AXError::NotificationUnsupported => WindowError::Unsupported,
-            // because this event shouldn't be possible (it's handled manually) and there is no enum variant for it, we label it as an arbitrary error
-            AXError::NotificationAlreadyRegistered => WindowError::ArbitraryFailure,
-            // same here
-            AXError::NotificationNotRegistered => WindowError::ArbitraryFailure,
-            // no idea when this could occur, it's not documented
-            AXError::NotEnoughPrecision => WindowError::ArbitraryFailure,
-            // called when the accessibility API timeout is reached
-            AXError::CannotComplete => WindowError::ArbitraryFailure,
-            AXError::Failure => WindowError::ArbitraryFailure,
-            _ => WindowError::ArbitraryFailure,
+            err @ (
+                // because this event shouldn't be possible (it's handled manually) and there is no enum variant for it, we label it as an arbitrary error
+                AXError::NotificationAlreadyRegistered
+                // same here
+                | AXError::NotificationNotRegistered
+                // no idea when this could occur, it's not documented
+                | AXError::NotEnoughPrecision
+                // called when the accessibility API timeout is reached
+                | AXError::CannotComplete
+                | AXError::Failure | _
+            ) => WindowError::OsError(io::Error::other(format!(
+                "accessibility API returned {err:?}",
+            ))),
         }
     }
 }
