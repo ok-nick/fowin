@@ -1,6 +1,5 @@
 mod chronology;
 pub mod executor;
-mod operation;
 mod state;
 mod timeline;
 

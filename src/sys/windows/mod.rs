@@ -1,4 +1,4 @@
-use std::{io, ptr, sync::LazyLock};
+use std::{io, marker::PhantomData, ptr, sync::LazyLock};
 
 use flume::{Receiver, Sender};
 use windows_sys::Win32::{
@@ -35,18 +35,18 @@ static EVENT_SENDER: LazyLock<(Sender<Event>, Receiver<Event>)> = LazyLock::new(
 pub struct Watcher {
     handle: HWINEVENTHOOK,
     receiver: Receiver<Event>,
+    // NOTE: replace with negative_impls when stabilized
+    //       https://github.com/rust-lang/rust/issues/68318
+    // NOTE: UnhookWinEvent must be executed on the same thread the hook was created
+    //       so do some additional runtime checks to ensure that
+    _not_send_sync: PhantomData<*const ()>,
 }
-
-// NOTE: UnhookWinEvent must be executed on the same thread the hook was created
-//       so do some additional runtime checks to ensure that
-impl !Send for Watcher {}
-impl !Sync for Watcher {}
 
 impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
         Ok(Watcher {
             handle: unsafe {
-                // TODO: can also regiser multiple hooks with specific event ids
+                // TODO: can also register multiple hooks with specific event ids
                 SetWinEventHook(
                     EVENT_MIN,
                     EVENT_MAX,
@@ -58,6 +58,7 @@ impl Watcher {
                 )
             },
             receiver: EVENT_SENDER.1.clone(),
+            _not_send_sync: PhantomData,
         })
     }
 
@@ -107,26 +108,26 @@ pub fn focused_window() -> Result<Option<Window>, WindowError> {
     }
 }
 
-unsafe extern "system" fn enum_windows(hwnd: HWND, lParam: LPARAM) -> BOOL {
-    let windows = lParam as *mut Vec<HWND>;
+unsafe extern "system" fn enum_windows(hwnd: HWND, l_param: LPARAM) -> BOOL {
+    let windows = l_param as *mut Vec<HWND>;
     (*windows).push(hwnd);
     TRUE
 }
 
 unsafe extern "system" fn window_event(
-    hwineventhook: HWINEVENTHOOK,
+    _hwineventhook: HWINEVENTHOOK,
     event: u32,
     hwnd: HWND,
     idobject: i32,
-    idchild: i32,
-    ideventthread: u32,
-    dwmseventtime: u32,
+    _idchild: i32,
+    _ideventthread: u32,
+    _dwmseventtime: u32,
 ) {
     if idobject == OBJID_WINDOW {
         // TODO: https://github.com/LGUG2Z/komorebi/issues/151
         //       supposedly events are "guaranteed to be in sequential order" as described
         //       by SetWinEventHook docs, but komorebi says different? I wonder if the timestamp would
-        //       notice the discrepency?
+        //       notice the discrepancy?
         // let timestamp = Duration::from_millis(dwmseventtime as u64);
 
         let window = protocol::Window(Window::new(hwnd));

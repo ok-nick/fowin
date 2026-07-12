@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use fowin::WindowError;
 use fowin_test_lib::{
     executor::{FowinExecutor, WinitExecutor},
-    Action, Mutation, Position, Size, State, Step, Timeline,
+    Action, Mutation, Position, State, Step, Timeline,
 };
 
 #[macro_use]

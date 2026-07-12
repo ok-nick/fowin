@@ -8,7 +8,7 @@ mod window;
 
 // TODO: differentiate physical and logical pixels
 
-/// A posiiton with an x and y axis.
+/// A position with an x and y axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Position {
     /// The x position.
@@ -124,14 +124,18 @@ pub enum WindowError {
     InvalidHandle,
     /// The specified window does not support this type of operation.
     Unsupported,
-    /// There was a random internal failure in the operating system.
-    ArbitraryFailure,
-    // TODO: error type derived from windows where errors aren't predictable (maybe combine this w/ ArbitraryFailure)
-    ///
+    /// There was an unexpected operating system failure.
     OsError(io::Error),
 }
 
-impl Error for WindowError {}
+impl Error for WindowError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            WindowError::OsError(source) => Some(source),
+            _ => None,
+        }
+    }
+}
 
 impl fmt::Display for WindowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -160,11 +164,8 @@ impl fmt::Display for WindowError {
             WindowError::Unsupported => {
                 write!(f, "the window does not support the windowing API")
             }
-            WindowError::ArbitraryFailure => {
-                write!(f, "arbitrary failure returned by the operating system")
-            }
-            WindowError::OsError(_) => {
-                write!(f, "TODO")
+            WindowError::OsError(source) => {
+                write!(f, "unexpected operating system failure: {source}")
             }
         }
     }

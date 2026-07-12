@@ -1,5 +1,5 @@
 use fowin_test_lib::{
-    executor::{BinaryExecutor, ExecutionError, FowinExecutor, WinitExecutor},
+    executor::{ExecutionError, FowinExecutor, WinitExecutor},
     Action, Mutation, State, Step, Timeline,
 };
 
@@ -11,8 +11,8 @@ fn main() -> Result<(), ExecutionError> {
     // DONE: - change hidden to minimized?
     // wip:  - impl or cleanup at_front and focused
     //       - fixup logical/physical size distinctions
-    // DONE: - fowin exectue method
-    // DONE: - set window titles to GUID so when running integration tests they don't interefere
+    // DONE: - fowin execute method
+    // DONE: - set window titles to GUID so when running integration tests they don't interfere
     //       - if it all works, we can start re-adding in the randomization functionality, checkout proptest
     //       - can also impl some integration tests for fowin that replicate the functionality below and call into the test lib (no randomization) for CI
     //       - before integration tests, need to implement BinaryExecutor
