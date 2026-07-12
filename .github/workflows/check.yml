@@ -7,6 +7,12 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/check.yml"
+  pull_request:
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/check.yml"
 
 jobs:
   lint:
@@ -39,3 +45,19 @@ jobs:
 
       - name: rustfmt
         run: cargo fmt --all -- --check
+
+  docs-rs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: dtolnay/install@cargo-docs-rs
+
+      - name: run cargo-docs-rs
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo docs-rs
