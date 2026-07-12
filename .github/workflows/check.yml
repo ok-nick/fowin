@@ -10,9 +10,6 @@ on:
 
 jobs:
   lint:
-    # TODO: temp disable until lints are cleaned up
-    if: ${{ false }}
-
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
