@@ -75,10 +75,10 @@ impl Application {
         })
     }
 
-    pub fn supported(&self) {
-        // TODO: return a list of notifications that are able to be registered by this app
-        //       probably should do it on a window level, since we register windows now
-    }
+    // pub fn supported(&self) {
+    //     // TODO: return a list of notifications that are able to be registered by this app
+    //     //       probably should do it on a window level, since we register windows now
+    // }
 
     pub fn watch(
         &self,

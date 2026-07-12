@@ -44,7 +44,11 @@ pub enum Response {
 
 #[derive(Debug)]
 pub struct BinaryExecutor {
+    // TODO: fix
+    #[allow(dead_code)]
     namespace: String,
+    // TODO: fix
+    #[allow(dead_code)]
     process: Child,
     stream: RefCell<BufReader<Stream>>,
 }

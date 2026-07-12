@@ -8,7 +8,7 @@ use std::{
     ptr,
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, ThreadId},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use libc::pid_t;
@@ -59,6 +59,7 @@ pub type WindowHandle = CFRetainedSafe<AXUIElement>;
 // https://stackoverflow.com/questions/7422666/uniquely-identify-active-window-on-os-x
 // https://stackoverflow.com/questions/311956/getting-a-unique-id-for-a-window-of-another-application/312099#312099
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum WatcherState {
     Registering(pid_t),
@@ -107,17 +108,17 @@ impl Watcher {
     }
 
     // TODO: same as below, but orders the output
-    pub fn next_request_buffered_ordered(
-        &self,
-        interval: Duration,
-    ) -> Result<WindowEvent, WindowError> {
-        todo!()
-    }
+    // pub fn next_request_buffered_ordered(
+    //     &self,
+    //     interval: Duration,
+    // ) -> Result<WindowEvent, WindowError> {
+    //     todo!()
+    // }
 
     // TODO: this function will call CFRunLoopInMode w/ interval seconds, it returns a list of events >= interval age
-    pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
-        todo!()
-    }
+    // pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
+    //     todo!()
+    // }
 
     // TODO: This function MUST be called on the thread its watchers were created (preferably main thread for perf/responsiveness?)
     //
