@@ -73,7 +73,6 @@ pub struct Watcher {
     receiver: Receiver<Result<WindowEvent, WindowError>>,
     watchers: HashMap<pid_t, WatcherState>,
     thread_id: ThreadId,
-    // TODO: can I use a main thread marker here or main thread bound?
     // NOTE: replace with negative_impls when stabilized
     //       https://github.com/rust-lang/rust/issues/68318
     // The run loop must be ran on the thread the watchers are created.

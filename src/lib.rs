@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 pub use protocol::{Position, Size, Window, WindowError, WindowEvent, WindowHandle};
 
 mod protocol;
@@ -9,11 +7,6 @@ mod sys;
 #[derive(Debug)]
 pub struct Watcher {
     inner: sys::Watcher,
-    // TODO: many backends (macos + windowws) must be called on the same thread it was created
-    //       consider also doing runtime checks in the public API, ehhh??
-    // NOTE: replace with negative_impls when stabilized
-    //       https://github.com/rust-lang/rust/issues/68318
-    _not_send_sync: PhantomData<*const ()>,
 }
 
 impl Watcher {
@@ -27,7 +20,6 @@ impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
         Ok(Watcher {
             inner: sys::Watcher::new()?,
-            _not_send_sync: PhantomData,
         })
     }
 
