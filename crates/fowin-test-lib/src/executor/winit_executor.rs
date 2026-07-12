@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::{debug, info};
+use log::debug;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
@@ -161,6 +161,7 @@ impl WindowProps for &Window {
 
     fn is_at_front(&self) -> Result<bool, ExecutionError> {
         // TODO: set WindowLevel::AlwaysOnTop, then WindowLevel::Normal?
+        #[allow(unreachable_code)]
         Ok(todo!())
     }
 

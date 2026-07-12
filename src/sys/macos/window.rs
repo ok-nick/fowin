@@ -178,6 +178,7 @@ impl Window {
             ];
             // TODO: supposedly this option is deprecated, but it does provide the behavior we want, TEST IT
             //       this method also returns a bool signifying if the app has quit or if it can be activated
+            #[allow(deprecated)]
             app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
         }
         todo!()

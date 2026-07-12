@@ -1,3 +1,6 @@
+// TODO: temporary while in dev
+#![allow(unused)]
+
 #[cfg(target_os = "macos")]
 #[path = "macos.rs"]
 mod macos;

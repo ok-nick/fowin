@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, time::Duration};
+use std::{collections::HashMap, fmt::Debug};
 
 use fowin::Window;
 use log::{debug, info};
@@ -89,8 +89,7 @@ impl FowinExecutor {
                     }
                 }
                 Err(err) => {
-                    // TODO: need to fix the arbitraryerror stuff
-                    // println!("ERR: {:?}", err);
+                    debug!("Error while iterating window: {err}");
                 }
             }
         }
@@ -201,6 +200,7 @@ impl WindowProps for &Window {
 
     fn is_at_front(&self) -> Result<bool, ExecutionError> {
         // TODO: is it possible that we can add an is_at_front to macos?
+        #[allow(unreachable_code)]
         Ok(todo!())
     }
 

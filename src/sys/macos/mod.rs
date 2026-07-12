@@ -2,12 +2,13 @@ use std::{
     borrow::Borrow,
     collections::HashMap,
     ffi::c_void,
+    io,
     iter::{self, Once},
     marker::PhantomData,
     ptr,
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, ThreadId},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use libc::pid_t;
@@ -58,6 +59,7 @@ pub type WindowHandle = CFRetainedSafe<AXUIElement>;
 // https://stackoverflow.com/questions/7422666/uniquely-identify-active-window-on-os-x
 // https://stackoverflow.com/questions/311956/getting-a-unique-id-for-a-window-of-another-application/312099#312099
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum WatcherState {
     Registering(pid_t),
@@ -106,17 +108,17 @@ impl Watcher {
     }
 
     // TODO: same as below, but orders the output
-    pub fn next_request_buffered_ordered(
-        &self,
-        interval: Duration,
-    ) -> Result<WindowEvent, WindowError> {
-        todo!()
-    }
+    // pub fn next_request_buffered_ordered(
+    //     &self,
+    //     interval: Duration,
+    // ) -> Result<WindowEvent, WindowError> {
+    //     todo!()
+    // }
 
     // TODO: this function will call CFRunLoopInMode w/ interval seconds, it returns a list of events >= interval age
-    pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
-        todo!()
-    }
+    // pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
+    //     todo!()
+    // }
 
     // TODO: This function MUST be called on the thread its watchers were created (preferably main thread for perf/responsiveness?)
     //
@@ -254,7 +256,9 @@ pub fn request_trust() -> Result<bool, WindowError> {
     };
     match options {
         Some(options) => Ok(unsafe { AXIsProcessTrustedWithOptions(Some(&options)) }),
-        None => Err(WindowError::ArbitraryFailure),
+        None => Err(WindowError::OsError(io::Error::other(
+            "failed to create `CFDictionary` for accessibility trust options",
+        ))),
     }
 }
 
@@ -517,16 +521,19 @@ impl From<AXError> for WindowError {
             AXError::ParameterizedAttributeUnsupported => WindowError::Unsupported,
             AXError::ActionUnsupported => WindowError::Unsupported,
             AXError::NotificationUnsupported => WindowError::Unsupported,
-            // because this event shouldn't be possible (it's handled manually) and there is no enum variant for it, we label it as an arbitrary error
-            AXError::NotificationAlreadyRegistered => WindowError::ArbitraryFailure,
-            // same here
-            AXError::NotificationNotRegistered => WindowError::ArbitraryFailure,
-            // no idea when this could occur, it's not documented
-            AXError::NotEnoughPrecision => WindowError::ArbitraryFailure,
-            // called when the accessibility API timeout is reached
-            AXError::CannotComplete => WindowError::ArbitraryFailure,
-            AXError::Failure => WindowError::ArbitraryFailure,
-            _ => WindowError::ArbitraryFailure,
+            err @ (
+                // because this event shouldn't be possible (it's handled manually) and there is no enum variant for it, we label it as an arbitrary error
+                AXError::NotificationAlreadyRegistered
+                // same here
+                | AXError::NotificationNotRegistered
+                // no idea when this could occur, it's not documented
+                | AXError::NotEnoughPrecision
+                // called when the accessibility API timeout is reached
+                | AXError::CannotComplete
+                | AXError::Failure | _
+            ) => WindowError::OsError(io::Error::other(format!(
+                "accessibility API returned {err:?}",
+            ))),
         }
     }
 }

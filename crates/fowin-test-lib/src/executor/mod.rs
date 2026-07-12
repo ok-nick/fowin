@@ -4,7 +4,6 @@ use std::{
 };
 
 use fowin::WindowError;
-use log::info;
 
 use crate::{state::Mutation, timeline::Step, Position, Size};
 #[cfg(feature = "binary_executor")]
@@ -21,7 +20,7 @@ mod winit_executor;
 
 pub trait Executor {
     // Originally, this function validated the entire state, but it turns out we can't reliably guarantee
-    // window state won't be mutated by the OS. What we can guarantee is that the performed operaton (if
+    // window state won't be mutated by the OS. What we can guarantee is that the performed operation (if
     // no error) will, in fact, occur.
     fn window_props(&self, id: u32) -> Result<impl WindowProps, ExecutionError>;
 
