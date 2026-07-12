@@ -3,8 +3,8 @@
 # fowin
 
 [![crates.io](https://img.shields.io/crates/v/fowin.svg)](https://crates.io/crates/fowin)
-[![docs.rs](https://docs.rs/fowin/badge.svg)](https://docs.rs/fowin)
-[![build](https://github.com/ok-nick/fowin/actions/workflows/test.yml/badge.svg)](https://github.com/ok-nick/fowin/actions/workflows/test.yml)
+<!-- [![docs.rs](https://docs.rs/fowin/badge.svg)](https://docs.rs/fowin) -->
+<!-- [![build](https://github.com/ok-nick/fowin/actions/workflows/test.yml/badge.svg)](https://github.com/ok-nick/fowin/actions/workflows/test.yml) -->
 
 </div>
 
