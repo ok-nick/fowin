@@ -1,0 +1,38 @@
+name: test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/test.yml"
+
+jobs:
+  tests:
+    # TODO: all macOS tests return kAXErrorNoValue, likely because accessibility permissions
+    #       aren't granted and can't be granted on GitHub runners since SIP is enabled
+    if: false
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # TODO: add windows-latest when functional
+        os: [macos-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        # macOS requires the tests to run on the main thread
+        run: cargo test --all-features --all-targets -- --test-threads 1
+
+      - name: cargo test
+        if: runner.os != 'macOS'
+        run: cargo test --all-features --all-targets
