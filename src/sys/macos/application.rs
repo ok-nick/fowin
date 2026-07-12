@@ -131,7 +131,9 @@ impl Iterator for WindowIterator {
 pub struct Watcher {
     // Resources are implicitly dropped after observer, so it's safe.
     observer: CFRetainedSafe<AXObserver>,
-    // TODO: maybe this should be an Arc instead of a Box?
+    // macOS stores pointers to these values which must be dropped when
+    // this struct is dropped.
+    #[allow(clippy::vec_box)]
     _resources: Vec<Box<CallbackInfo>>,
 }
 
@@ -198,25 +200,25 @@ impl Watcher {
                         // TODO: handle error?
                         window_handle.set_messaging_timeout(app.timeout.as_secs_f32());
                     }
-                    let info = Box::into_raw(Box::new(CallbackInfo {
+                    let info = Box::new(CallbackInfo {
                         sender: sender.clone(),
                         notification: Notification::Destroyed(CFRetainedSafe(
                             window_handle.clone(),
                         )),
-                    }));
+                    });
 
                     Watcher::add_notification(
                         &CFString::from_static_str(kAXUIElementDestroyedNotification),
                         &observer,
                         &window_handle,
-                        info,
+                        info.as_ref(),
                     )?;
 
-                    resources.push(unsafe { Box::from_raw(info) })
+                    resources.push(info)
                 }
 
                 for notification in Watcher::NOTIFICATIONS {
-                    let info = Box::into_raw(Box::new(CallbackInfo {
+                    let info = Box::new(CallbackInfo {
                         sender: sender.clone(),
                         notification: match notification {
                             ffi::kAXWindowCreatedNotification => {
@@ -247,16 +249,16 @@ impl Watcher {
                             }
                             _ => unreachable!(),
                         },
-                    }));
+                    });
 
                     Watcher::add_notification(
                         &CFString::from_static_str(notification),
                         &observer,
                         &app.inner,
-                        info,
+                        info.as_ref(),
                     )?;
 
-                    resources.push(unsafe { Box::from_raw(info) });
+                    resources.push(info);
                 }
 
                 Ok(Watcher {
@@ -281,10 +283,14 @@ impl Watcher {
         notification: &CFString,
         observer_handle: &AXObserver,
         window_handle: &AXUIElement,
-        info: *mut CallbackInfo,
+        info: &CallbackInfo,
     ) -> Result<(), WindowError> {
         let result = unsafe {
-            observer_handle.add_notification(window_handle, notification, info as *mut _)
+            observer_handle.add_notification(
+                window_handle,
+                notification,
+                info as *const _ as *mut _,
+            )
         };
         match result {
             AXError::Success => {}
@@ -345,14 +351,13 @@ pub struct CallbackInfo {
 unsafe extern "C-unwind" fn app_notification(
     _observer: NonNull<AXObserver>,
     element: NonNull<AXUIElement>,
-    notification: NonNull<CFString>,
+    _notification: NonNull<CFString>,
     refcon: *mut raw::c_void,
 ) {
-    // TODO: is this retain temporary for testing?
-    let notification = unsafe { CFRetained::retain(notification) };
+    // let notification = unsafe { CFRetained::retain(notification) };
     // println!("{:?}", notification.to_string());
 
-    let callback_info = refcon as *mut CallbackInfo;
+    let callback_info = refcon as *const CallbackInfo;
     let event = match &(*callback_info).notification {
         Notification::Created(app_handle)
         | Notification::Focused(app_handle)
