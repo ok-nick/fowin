@@ -12,10 +12,10 @@ pub struct Watcher {
 impl Watcher {
     /// Watches for all window events.
     ///
-    /// To stop watching events, drop the returned [Watcher](Watcher).
+    /// To stop watching events, drop the returned [Watcher].
     ///
     /// Note, this function will begin listening to new events. To access a list of
-    /// existing windows, call [`Watcher::iter_windows`](Watcher::iter_windows).
+    /// existing windows, call [`iter_windows`].
     #[inline]
     pub fn new() -> Result<Watcher, WindowError> {
         Ok(Watcher {
