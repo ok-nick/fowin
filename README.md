@@ -40,7 +40,7 @@ $ cargo add fowin
 
 ### Listing Windows
 
-Use `iter_windows` to inspect windows that already exist.
+Use [`iter_windows`](https://docs.rs/fowin/latest/fowin/fn.iter_windows.html) to inspect windows that already exist.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
@@ -57,7 +57,7 @@ See [`examples/iter_windows.rs`](examples/iter_windows.rs) for a more comprehens
 
 ### Watching Windows
 
-Use `Watcher` to receive events for future window changes.
+Use [`Watcher`](https://docs.rs/fowin/latest/fowin/struct.Watcher.html) to receive events for future window changes.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
@@ -83,7 +83,7 @@ See [`examples/watch_windows.rs`](examples/watch_windows.rs) for a more comprehe
 
 ### Manipulating Windows
 
-Use a `Window` handle to move, resize, focus, change visibility, etc.
+Use a [`Window`](https://docs.rs/fowin/latest/fowin/struct.Window.html) handle to move, resize, focus, change visibility, etc.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
@@ -106,7 +106,7 @@ See the [`examples`](examples) folder for more.
 
 ### Operations
 
-`Window` supports:
+[`Window`](https://docs.rs/fowin/latest/fowin/struct.Window.html) supports:
 
 - reading the title, size, and position
 - checking focus, fullscreen, minimized, and hidden state
@@ -117,14 +117,14 @@ See the [`examples`](examples) folder for more.
 
 ### Events
 
-`Watcher` can report the following `WindowEvent`s:
+[`Watcher`](https://docs.rs/fowin/latest/fowin/struct.Watcher.html) can report the following events:
 
-- `Opened` / `Closed`
-- `Hidden` / `Shown`
-- `Minimized` / `Unminimized`
-- `Focused`
-- `Moved` / `Resized`
-- `Renamed`
+- opened / closed
+- hidden / shown
+- minimized / unminimized
+- focused
+- moved / resized
+- renamed
 
 ## FAQ
 
