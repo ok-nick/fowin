@@ -3,8 +3,8 @@
 # fowin
 
 [![crates.io](https://img.shields.io/crates/v/fowin.svg)](https://crates.io/crates/fowin)
-<!-- [![docs.rs](https://docs.rs/fowin/badge.svg)](https://docs.rs/fowin) -->
-<!-- [![build](https://github.com/ok-nick/fowin/actions/workflows/test.yml/badge.svg)](https://github.com/ok-nick/fowin/actions/workflows/test.yml) -->
+[![docs.rs](https://docs.rs/fowin/badge.svg)](https://docs.rs/fowin)
+[![test](https://github.com/ok-nick/fowin/actions/workflows/test.yml/badge.svg)](https://github.com/ok-nick/fowin/actions/workflows/test.yml)
 
 </div>
 
@@ -18,26 +18,29 @@ window lifecycle events.
 
 | Platform | Status |
 | --- | --- |
-| macOS | ✅ |
-| Windows | ⚠️ Partial |
-| Linux | ❌ |
+| macOS | ✓ |
+| Windows | ⚠ |
+| Linux | ✗ |
 
-Windows support is still in development and experimental. It is not guaranteed to work.
+Windows support is experimental and under active development. It is not guaranteed to work.
 
-## Installation
+> [!NOTE]
+> macOS requires accessibility permissions to be granted before it can inspect or control other
+windows. Call [`fowin::trusted`](https://docs.rs/fowin/latest/fowin/fn.trusted.html) to check whether
+permission has been granted, and [`fowin::request_trust`](https://docs.rs/fowin/latest/fowin/fn.request_trust.html)
+to prompt the user to grant it.
 
-Add this to your `Cargo.toml`:
+## Get Started
 
-```toml
-[dependencies]
-fowin = "<version>"
+```bash
+$ cargo add fowin
 ```
 
 ## Usage
 
 ### Listing Windows
 
-Use `iter_windows` to inspect windows that already exist.
+Use [`iter_windows`](https://docs.rs/fowin/latest/fowin/fn.iter_windows.html) to inspect windows that already exist.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
@@ -50,9 +53,11 @@ fn main() -> Result<(), fowin::WindowError> {
 }
 ```
 
+See [`examples/iter_windows.rs`](examples/iter_windows.rs) for a more comprehensive example.
+
 ### Watching Windows
 
-Use `Watcher` to receive events for future window changes.
+Use [`Watcher`](https://docs.rs/fowin/latest/fowin/struct.Watcher.html) to receive events for future window changes.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
@@ -74,13 +79,16 @@ fn main() -> Result<(), fowin::WindowError> {
 }
 ```
 
+See [`examples/watch_windows.rs`](examples/watch_windows.rs) for a more comprehensive example.
+
 ### Manipulating Windows
 
-Use a `Window` handle to move, resize, focus, change visibility, etc.
+Use a [`Window`](https://docs.rs/fowin/latest/fowin/struct.Window.html) handle to move, resize, focus, change visibility, etc.
 
 ```rust
 fn main() -> Result<(), fowin::WindowError> {
     if let Some(window) = fowin::focused_window()? {
+        window.focus()?;
         window.reposition(fowin::Position { x: 100.0, y: 100.0 })?;
         window.resize(fowin::Size {
             width: 900.0,
@@ -92,9 +100,13 @@ fn main() -> Result<(), fowin::WindowError> {
 }
 ```
 
-## Supported Window Operations
+See the [`examples`](examples) folder for more.
 
-`Window` supports:
+## Supported Features
+
+### Operations
+
+[`Window`](https://docs.rs/fowin/latest/fowin/struct.Window.html) supports:
 
 - reading the title, size, and position
 - checking focus, fullscreen, minimized, and hidden state
@@ -103,9 +115,25 @@ fn main() -> Result<(), fowin::WindowError> {
 - fullscreening and unfullscreening
 - showing, hiding, and bringing windows to the front
 
+### Events
+
+[`Watcher`](https://docs.rs/fowin/latest/fowin/struct.Watcher.html) can report the following events:
+
+- opened / closed
+- hidden / shown
+- minimized / unminimized
+- focused
+- moved / resized
+- renamed
+
 ## FAQ
 
 ### How is this different from `winit`?
 
-`winit` manages windows created by the local application. `fowin` manages foreign windows owned by
+`winit` manages windows created by the local application. `fowin` manages windows created by
 other applications. That requires platform APIs outside the scope of normal application windowing.
+
+### How do I create a window?
+
+`fowin` cannot create windows, it only inspects and controls windows owned by other applications.
+To create a window, use a windowing library such as [`winit`](https://github.com/rust-windowing/winit).
