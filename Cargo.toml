@@ -12,6 +12,9 @@ license = "MIT"
 [workspace]
 members = [".", "crates/*"]
 
+[package.metadata.docs.rs]
+default-target = "aarch64-apple-darwin"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 flume = "0.11.0"
 windows-interface = "0.56.0"
