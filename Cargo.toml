@@ -1,6 +1,6 @@
 [package]
 name = "fowin"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["ok-nick <nick.libraries@gmail.com>"]
 description = """
 a cross-platform foreign window handling library
