@@ -83,8 +83,8 @@ impl Application {
     pub fn watch(
         &self,
         sender: Sender<Result<WindowEvent, WindowError>>,
-    ) -> Result<Watcher, WindowError> {
-        Watcher::new(self, sender)
+    ) -> Result<AppWatcher, WindowError> {
+        AppWatcher::new(self, sender)
     }
 
     // Some processes aren't immediately accessible by the AX API and default to erroring with kAXErrorCannotComplete.
@@ -128,7 +128,7 @@ impl Iterator for WindowIterator {
 }
 
 #[derive(Debug)]
-pub struct Watcher {
+pub struct AppWatcher {
     // Resources are implicitly dropped after observer, so it's safe.
     observer: CFRetainedSafe<AXObserver>,
     // macOS stores pointers to these values which must be dropped when
@@ -137,7 +137,7 @@ pub struct Watcher {
     _resources: Vec<Box<CallbackInfo>>,
 }
 
-impl Watcher {
+impl AppWatcher {
     // Some additional information about these events:
     // https://github.com/appium/appium-for-mac/blob/9e154e7de378374760344abd8572338535d6b7d8/Frameworks/PFAssistive.framework/Versions/J/Headers/PFUIElement.h#L961-L994
     const NOTIFICATIONS: [&'static str; 10] = [
@@ -176,7 +176,7 @@ impl Watcher {
     pub fn new(
         app: &Application,
         sender: Sender<Result<WindowEvent, WindowError>>,
-    ) -> Result<Watcher, WindowError> {
+    ) -> Result<AppWatcher, WindowError> {
         let mut observer = ptr::null_mut();
         let result = unsafe {
             AXObserver::create(
@@ -191,7 +191,7 @@ impl Watcher {
 
                 let raw_windows = raw_windows(&app.inner)?;
                 let mut resources =
-                    Vec::with_capacity(raw_windows.len() + Watcher::NOTIFICATIONS.len());
+                    Vec::with_capacity(raw_windows.len() + AppWatcher::NOTIFICATIONS.len());
 
                 // Since the destroyed notification doesn't include any information on the window, we must register
                 // for each window with opaque data specifying the window being destroyed.
@@ -207,7 +207,7 @@ impl Watcher {
                         )),
                     });
 
-                    Watcher::add_notification(
+                    AppWatcher::add_notification(
                         &CFString::from_static_str(kAXUIElementDestroyedNotification),
                         &observer,
                         &window_handle,
@@ -217,7 +217,7 @@ impl Watcher {
                     resources.push(info)
                 }
 
-                for notification in Watcher::NOTIFICATIONS {
+                for notification in AppWatcher::NOTIFICATIONS {
                     let info = Box::new(CallbackInfo {
                         sender: sender.clone(),
                         notification: match notification {
@@ -251,7 +251,7 @@ impl Watcher {
                         },
                     });
 
-                    Watcher::add_notification(
+                    AppWatcher::add_notification(
                         &CFString::from_static_str(notification),
                         &observer,
                         &app.inner,
@@ -261,7 +261,7 @@ impl Watcher {
                     resources.push(info);
                 }
 
-                Ok(Watcher {
+                Ok(AppWatcher {
                     observer: CFRetainedSafe(observer),
                     _resources: resources,
                 })

@@ -4,15 +4,16 @@ use std::{
     ffi::c_void,
     io,
     iter::{self, Once},
-    marker::PhantomData,
     ptr,
     sync::mpsc::{self, Receiver, Sender},
-    thread::{self, ThreadId},
+    thread,
     time::Instant,
 };
 
 use libc::pid_t;
-use objc2::{define_class, msg_send, rc::Retained, runtime::AnyObject, AnyThread};
+use objc2::{
+    define_class, msg_send, rc::Retained, runtime::AnyObject, AnyThread, MainThreadMarker,
+};
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::{
     kAXTrustedCheckOptionPrompt, AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
@@ -63,29 +64,24 @@ pub type WindowHandle = CFRetainedSafe<AXUIElement>;
 #[derive(Debug)]
 pub enum WatcherState {
     Registering(pid_t),
-    Registered(application::Watcher),
+    Registered(application::AppWatcher),
 }
 
 #[derive(Debug)]
 pub struct Watcher {
-    app_watcher: AppWatcher,
+    workspace_watcher: WorkspaceWatcher,
     sender: Sender<Result<WindowEvent, WindowError>>,
     receiver: Receiver<Result<WindowEvent, WindowError>>,
     watchers: HashMap<pid_t, WatcherState>,
-    thread_id: ThreadId,
-    // NOTE: replace with negative_impls when stabilized
-    //       https://github.com/rust-lang/rust/issues/68318
-    // The run loop must be ran on the thread the watchers are created.
-    _not_send_sync: PhantomData<*const ()>,
 }
 
 impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
         // Start the app watcher so we never miss any new apps while registering existing apps.
-        let app_watcher = AppWatcher::new();
+        let workspace_watcher = WorkspaceWatcher::new();
 
         for app in iter_apps() {
-            app_watcher
+            workspace_watcher
                 .context
                 .sender
                 .send(AppEvent {
@@ -98,12 +94,10 @@ impl Watcher {
 
         let (sender, receiver) = mpsc::channel();
         Ok(Watcher {
-            app_watcher,
+            workspace_watcher,
             sender,
             receiver,
             watchers: HashMap::new(),
-            thread_id: thread::current().id(),
-            _not_send_sync: PhantomData,
         })
     }
 
@@ -120,24 +114,21 @@ impl Watcher {
     //     todo!()
     // }
 
-    // TODO: This function MUST be called on the thread its watchers were created (preferably main thread for perf/responsiveness?)
-    //
-    // TODO: the user may run their own run loop somewhere else, this code would interfere with that
-    //       it may be wise to separate the run loop logic from the receiver logic
+    /// Blocks until the next window event, pumping the main thread's run loop as needed.
+    ///
+    /// Must be called on the main thread because detecting new app launches/terminations relies
+    /// on `NSWorkspace`, which only delivers updates while the process's actual main thread has
+    /// an active run loop.
     pub fn next_request(&mut self) -> Result<WindowEvent, WindowError> {
         assert!(
-            thread::current().id() == self.thread_id,
-            "can only get next request on the same thread the `Watcher` was created"
+            MainThreadMarker::new().is_some(),
+            "`next_request` must be called on the main thread"
         );
-
-        if let Some(event) = self.app_watcher.next_request() {
-            self.handle_app_event(event)?;
-        }
 
         // Some things to know:
         // * CFRunLoopInMode caches events internally when they happen. Calling the function will execute the callback for one event.
         // * The if statement below is to handle outstanding events (e.g. failing to register, new app added, etc.).
-        if let Ok(event) = self.receiver.try_recv() {
+        if let Some(event) = self.try_next_request_no_pump() {
             return event;
         }
 
@@ -156,7 +147,7 @@ impl Watcher {
             }
 
             // Handle registering/deregistering launched/terminated apps.
-            if let Some(event) = self.app_watcher.next_request() {
+            if let Some(event) = self.workspace_watcher.next_request() {
                 self.handle_app_event(event)?;
                 // Since CFRunLoopInMode only processes one event at a time, skip checking for window events.
                 continue;
@@ -171,6 +162,31 @@ impl Watcher {
         }
     }
 
+    /// Attempts to return a pending value on this `Watcher` without blocking.
+    ///
+    /// Like [`next_request`], but never pumps any run loop. Meant for callers who already run
+    /// their own run loop and just want to drain this `Watcher`'s event queue as part of that.
+    /// Because nothing here drives the `CFRunLoop`, catching new app launches/terminations depends
+    /// on your run loop still pumping the **main thread** somewhere. If it isn't, those specific
+    /// events won't arrive.
+    ///
+    /// Unlike [`next_request`], this isn't required to be called on the main thread specifically
+    /// since the run loop isn't pumped here.
+    ///
+    /// [`next_request`]: Watcher::next_request
+    pub fn try_next_request_no_pump(&mut self) -> Option<Result<WindowEvent, WindowError>> {
+        if let Some(event) = self.workspace_watcher.next_request() {
+            if let Err(err) = self.handle_app_event(event) {
+                return Some(Err(err));
+            }
+        }
+
+        // It can only error w/ disconnected if the sender is disconnected, but that's not possible because we
+        // always have a reference to the sender within this struct. If it errors with empty then there's simply
+        // no event ready yet.
+        self.receiver.try_recv().ok()
+    }
+
     fn handle_app_event(&mut self, event: AppEvent) -> Result<(), WindowError> {
         match event.kind {
             AppEventKind::Launched => {
@@ -180,10 +196,12 @@ impl Watcher {
                 // We spawn a new thread because some applications can take a long time to respond to AX operations or it is taking a long
                 // time for the app to initialize.
                 let sender = self.sender.clone();
-                let app_sender = self.app_watcher.context.sender.clone();
-                let source = CFRetainedSafe(self.app_watcher.context.source.clone());
-                // TODO: safe to unwrap?
-                let thread_loop = CFRetainedSafe(CFRunLoop::current().unwrap());
+                let app_sender = self.workspace_watcher.context.sender.clone();
+                let source = CFRetainedSafe(self.workspace_watcher.context.source.clone());
+                // Even though the accessibility API doesn't require observers to be registered to
+                // the main thread's run loop, we do it anyway to stay consistent with `WorkspaceWatcher`,
+                // which does require it.
+                let thread_loop = CFRetainedSafe(CFRunLoop::main().unwrap());
 
                 thread::spawn(move || {
                     let app = Application::new(event.pid);
@@ -247,7 +265,6 @@ pub fn request_trust() -> Result<bool, WindowError> {
         CFDictionary::new(
             None,
             [kAXTrustedCheckOptionPrompt as *const _ as *const _].as_mut_ptr(),
-            // TODO: safe to unwrap?
             [kCFBooleanTrue.unwrap() as *const _ as *const _].as_mut_ptr(),
             1,
             ptr::null(),
@@ -328,7 +345,7 @@ fn filter_apps(
 pub enum AppEventKind {
     Launched,
     Terminated,
-    Registered(application::Watcher),
+    Registered(application::AppWatcher),
 }
 
 #[derive(Debug)]
@@ -339,12 +356,10 @@ pub struct AppEvent {
 
 define_class!(
     #[unsafe(super(NSObject))]
-    // TODO: set a name
-    #[name = "TODO_AppWatcher"]
     #[derive(Debug)]
-    struct AppWatcherInner;
+    struct WorkspaceWatcherInner;
 
-    impl AppWatcherInner {
+    impl WorkspaceWatcherInner {
         #[allow(non_snake_case)]
         #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
         unsafe fn observeValueForKeyPath_ofObject_change_context(
@@ -392,8 +407,7 @@ define_class!(
 
                 if sent {
                     (*context).source.signal();
-                    // TODO: safe to unwrap?
-                    CFRunLoop::current().unwrap().wake_up();
+                    CFRunLoop::main().unwrap().wake_up();
                 }
             }
         }
@@ -403,21 +417,29 @@ define_class!(
 #[derive(Debug)]
 pub struct Context {
     sender: Sender<AppEvent>,
-    // The reason we create a "dummy" source is because registering a KVO (AKA AppWatcherInner) does not trigger
+    // The reason we create a "dummy" source is because registering a KVO (AKA WorkspaceWatcherInner) does not trigger
     // a source as being "processed" thus not prompting CFRunLoopInMode to return.
     source: CFRetained<CFRunLoopSource>,
 }
 
-// TODO: kqueues also exist, but I'm not sure if it provides any advantages
+/// Uses key-value observing (KVO) on `NSWorkspace::running_applications` to detect and report
+/// app launches/terminations.
+///
+/// This requires the main thread's `CFRunLoop` to be executed, which is being done for callers
+/// in [`Watcher::next_request`].
+///
+/// Numerous options were considered, see [#10] for more details.
+///
+/// [#10]: https://github.com/ok-nick/fowin/issues/10
 #[derive(Debug)]
-pub struct AppWatcher {
-    inner: Retained<AppWatcherInner>,
+pub struct WorkspaceWatcher {
+    inner: Retained<WorkspaceWatcherInner>,
     context: Box<Context>,
     receiver: Receiver<AppEvent>,
 }
 
-impl AppWatcher {
-    pub fn new() -> AppWatcher {
+impl WorkspaceWatcher {
+    pub fn new() -> WorkspaceWatcher {
         let source = unsafe {
             CFRunLoopSource::new(
                 None,
@@ -438,8 +460,7 @@ impl AppWatcher {
         };
 
         unsafe {
-            // TODO: safe to unwrap?
-            CFRunLoop::current()
+            CFRunLoop::main()
                 .unwrap()
                 .add_source(source.as_deref(), kCFRunLoopDefaultMode);
         }
@@ -447,11 +468,11 @@ impl AppWatcher {
         let (sender, receiver) = mpsc::channel();
         let context = Box::into_raw(Box::new(Context {
             sender,
-            // TODO: safe to unwrap?
             source: source.unwrap(),
         }));
 
-        let inner: Retained<AppWatcherInner> = unsafe { msg_send![AppWatcherInner::alloc(), init] };
+        let inner: Retained<WorkspaceWatcherInner> =
+            unsafe { msg_send![WorkspaceWatcherInner::alloc(), init] };
         unsafe {
             let _: () = msg_send![
                 &NSWorkspace::sharedWorkspace(),
@@ -462,7 +483,7 @@ impl AppWatcher {
             ];
         }
 
-        AppWatcher {
+        WorkspaceWatcher {
             inner,
             context: unsafe { Box::from_raw(context) },
             receiver,
@@ -476,7 +497,7 @@ impl AppWatcher {
     }
 }
 
-impl Drop for AppWatcher {
+impl Drop for WorkspaceWatcher {
     fn drop(&mut self) {
         unsafe {
             let _: () = msg_send![
@@ -529,6 +550,7 @@ impl From<AXError> for WindowError {
                 // no idea when this could occur, it's not documented
                 | AXError::NotEnoughPrecision
                 // called when the accessibility API timeout is reached
+                // TODO: give this a WindowError::TimeoutReached error so the user can retry or ack?
                 | AXError::CannotComplete
                 | AXError::Failure | _
             ) => WindowError::OsError(io::Error::other(format!(
