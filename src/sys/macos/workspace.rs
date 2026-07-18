@@ -8,12 +8,14 @@ use libc::pid_t;
 use objc2::{define_class, msg_send, rc::Retained, runtime::AnyObject, AnyThread};
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_core_foundation::{
-    kCFRunLoopDefaultMode, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
+    kCFRunLoopDefaultMode, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
 };
 use objc2_foundation::{
     ns_string, NSArray, NSDictionary, NSKeyValueChangeKey, NSKeyValueChangeNewKey,
     NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSString,
 };
+
+use crate::sys::platform::ffi::CFRetainedSafe;
 
 use super::{application, filter_apps, iter_apps};
 
@@ -96,7 +98,7 @@ pub struct Context {
     pub sender: Sender<AppEvent>,
     // The reason we create a "dummy" source is because registering a KVO (AKA WorkspaceWatcherInner) does not trigger
     // a source as being "processed" thus not prompting CFRunLoopInMode to return.
-    pub source: CFRetained<CFRunLoopSource>,
+    pub source: CFRetainedSafe<CFRunLoopSource>,
 }
 
 /// Whether to watch all existing apps or to skip them and only watch new ones.
@@ -119,7 +121,7 @@ pub enum ExistingAppsBehavior {
 #[derive(Debug)]
 pub struct WorkspaceWatcher {
     inner: Retained<WorkspaceWatcherInner>,
-    pub context: Box<Context>,
+    context: Box<Context>,
     receiver: Receiver<AppEvent>,
 }
 
@@ -153,7 +155,7 @@ impl WorkspaceWatcher {
         let (sender, receiver) = mpsc::channel();
         let context = Box::into_raw(Box::new(Context {
             sender: sender.clone(),
-            source: source.unwrap(),
+            source: CFRetainedSafe(source.unwrap()),
         }));
 
         let inner: Retained<WorkspaceWatcherInner> =
@@ -185,6 +187,10 @@ impl WorkspaceWatcher {
             context: unsafe { Box::from_raw(context) },
             receiver,
         }
+    }
+
+    pub fn context(&self) -> &Context {
+        &self.context
     }
 
     // Assumes the run loop is being ran.

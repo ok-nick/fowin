@@ -175,16 +175,17 @@ impl Watcher {
                 self.watchers
                     .insert(event.pid, WatcherState::Registering(event.pid));
 
-                // We spawn a new thread because some applications can take a long time to respond to AX operations or it is taking a long
-                // time for the app to initialize.
+                let workspace_context = self.workspace_watcher.context();
+                let app_sender = workspace_context.sender.clone();
+                let source = workspace_context.source.clone();
                 let sender = self.sender.clone();
-                let app_sender = self.workspace_watcher.context.sender.clone();
-                let source = CFRetainedSafe(self.workspace_watcher.context.source.clone());
                 // Even though the accessibility API doesn't require observers to be registered to
                 // the main thread's run loop, we do it anyway to stay consistent with `WorkspaceWatcher`,
                 // which does require it.
                 let thread_loop = CFRetainedSafe(CFRunLoop::main().unwrap());
 
+                // We spawn a new thread because some applications can take a long time to respond to AX operations or it is taking a long
+                // time for the app to initialize.
                 thread::spawn(move || {
                     let app = Application::new(event.pid);
 
