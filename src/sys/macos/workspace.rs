@@ -105,6 +105,7 @@ pub struct Context {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExistingAppsBehavior {
     TriggerExisting,
+    #[allow(dead_code)]
     Skip,
 }
 
