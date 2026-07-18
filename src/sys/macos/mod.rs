@@ -33,7 +33,7 @@ use crate::{
     sys::platform::ffi::CFRetainedSafe,
 };
 
-use self::application::WindowIterator;
+use self::application::{ExistingWindowsBehavior, WindowIterator};
 pub use self::{application::Application, window::Window};
 
 mod application;
@@ -78,19 +78,7 @@ pub struct Watcher {
 impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
         // Start the app watcher so we never miss any new apps while registering existing apps.
-        let workspace_watcher = WorkspaceWatcher::new();
-
-        for app in iter_apps() {
-            workspace_watcher
-                .context
-                .sender
-                .send(AppEvent {
-                    kind: AppEventKind::Launched,
-                    pid: app.pid(),
-                })
-                // Sender + Receiver always exist.
-                .unwrap();
-        }
+        let workspace_watcher = WorkspaceWatcher::new(ExistingAppsBehavior::TriggerExisting);
 
         let (sender, receiver) = mpsc::channel();
         Ok(Watcher {
@@ -189,7 +177,7 @@ impl Watcher {
 
     fn handle_app_event(&mut self, event: AppEvent) -> Result<(), WindowError> {
         match event.kind {
-            AppEventKind::Launched => {
+            AppEventKind::Launched | AppEventKind::Existing => {
                 self.watchers
                     .insert(event.pid, WatcherState::Registering(event.pid));
 
@@ -218,7 +206,14 @@ impl Watcher {
                         return;
                     }
 
-                    match app.watch(sender.clone()) {
+                    let existing_windows = if matches!(event.kind, AppEventKind::Launched) {
+                        // When an app is launched and windows are created, we aren't quick enough to receive
+                        // an event for them, so we trigger `WindowEvent::Opened` for all existing windows.
+                        ExistingWindowsBehavior::TriggerExisting
+                    } else {
+                        ExistingWindowsBehavior::Skip
+                    };
+                    match app.watch(sender.clone(), existing_windows) {
                         Ok(watcher) => {
                             let thread_loop = thread_loop;
                             watcher.run_on_thread(&thread_loop);
@@ -343,6 +338,7 @@ fn filter_apps(
 
 #[derive(Debug)]
 pub enum AppEventKind {
+    Existing,
     Launched,
     Terminated,
     Registered(application::AppWatcher),
@@ -422,6 +418,13 @@ pub struct Context {
     source: CFRetained<CFRunLoopSource>,
 }
 
+/// Whether to watch all existing apps or to skip them and only watch new ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExistingAppsBehavior {
+    TriggerExisting,
+    Skip,
+}
+
 /// Uses key-value observing (KVO) on `NSWorkspace::running_applications` to detect and report
 /// app launches/terminations.
 ///
@@ -439,7 +442,7 @@ pub struct WorkspaceWatcher {
 }
 
 impl WorkspaceWatcher {
-    pub fn new() -> WorkspaceWatcher {
+    pub fn new(existing_apps_behavior: ExistingAppsBehavior) -> WorkspaceWatcher {
         let source = unsafe {
             CFRunLoopSource::new(
                 None,
@@ -467,7 +470,7 @@ impl WorkspaceWatcher {
 
         let (sender, receiver) = mpsc::channel();
         let context = Box::into_raw(Box::new(Context {
-            sender,
+            sender: sender.clone(),
             source: source.unwrap(),
         }));
 
@@ -481,6 +484,18 @@ impl WorkspaceWatcher {
                 options: NSKeyValueObservingOptions::New | NSKeyValueObservingOptions::Old,
                 context: context as *const c_void
             ];
+        }
+
+        if existing_apps_behavior == ExistingAppsBehavior::TriggerExisting {
+            for app in iter_apps() {
+                sender
+                    .send(AppEvent {
+                        kind: AppEventKind::Existing,
+                        pid: app.pid(),
+                    })
+                    // Sender + Receiver always exist.
+                    .unwrap();
+            }
         }
 
         WorkspaceWatcher {

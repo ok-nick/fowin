@@ -83,8 +83,9 @@ impl Application {
     pub fn watch(
         &self,
         sender: Sender<Result<WindowEvent, WindowError>>,
+        existing_windows: ExistingWindowsBehavior,
     ) -> Result<AppWatcher, WindowError> {
-        AppWatcher::new(self, sender)
+        AppWatcher::new(self, sender, existing_windows)
     }
 
     // Some processes aren't immediately accessible by the AX API and default to erroring with kAXErrorCannotComplete.
@@ -125,6 +126,15 @@ impl Iterator for WindowIterator {
             None
         }
     }
+}
+
+/// Whether to skip or trigger [`WindowEvent::Opened`] for all existing windows of an app.
+///
+/// [`WindowEvent::Created`]: crate::WindowEvent::Opened
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExistingWindowsBehavior {
+    TriggerExisting,
+    Skip,
 }
 
 #[derive(Debug)]
@@ -176,6 +186,7 @@ impl AppWatcher {
     pub fn new(
         app: &Application,
         sender: Sender<Result<WindowEvent, WindowError>>,
+        existing_windows_behavior: ExistingWindowsBehavior,
     ) -> Result<AppWatcher, WindowError> {
         let mut observer = ptr::null_mut();
         let result = unsafe {
@@ -214,7 +225,14 @@ impl AppWatcher {
                         info.as_ref(),
                     )?;
 
-                    resources.push(info)
+                    resources.push(info);
+
+                    if existing_windows_behavior == ExistingWindowsBehavior::TriggerExisting {
+                        if let Ok(window) = Window::new(window_handle.clone(), app.inner.0.clone())
+                        {
+                            let _ = sender.send(Ok(WindowEvent::Opened(protocol::Window(window))));
+                        }
+                    }
                 }
 
                 for notification in AppWatcher::NOTIFICATIONS {
