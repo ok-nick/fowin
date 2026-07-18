@@ -25,8 +25,9 @@ impl Watcher {
 
     /// Returns the next window event.
     ///
-    /// Note, these events are not guaranteed to be precisely ordered. However, they do provide
-    /// a timestamp that can be used for ordering. Consider buffering events if order is important.
+    /// ## Platform-specific
+    ///
+    /// - **macOS:** Can only be called on the main thread.
     #[inline]
     pub fn next_request(&mut self) -> Result<WindowEvent, WindowError> {
         self.inner.next_request()
