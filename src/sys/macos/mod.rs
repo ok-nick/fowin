@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io,
     iter::{self, Once},
     ptr,
@@ -61,64 +61,69 @@ pub enum WatcherState {
     Registered(application::AppWatcher),
 }
 
+/// A system event from an app or window.
+///
+/// All event types are stored in the same enum so that they can be joined into the same queue and
+/// somewhat properly ordered.
+#[derive(Debug)]
+pub enum Event {
+    Window {
+        pid: pid_t,
+        event: Result<WindowEvent, WindowError>,
+    },
+    App(AppEvent),
+}
+
 #[derive(Debug)]
 pub struct Watcher {
     workspace_watcher: WorkspaceWatcher,
-    sender: Sender<Result<WindowEvent, WindowError>>,
-    receiver: Receiver<Result<WindowEvent, WindowError>>,
-    watchers: HashMap<pid_t, WatcherState>,
+    sender: Sender<Event>,
+    receiver: Receiver<Event>,
+    app_watchers: HashMap<pid_t, WatcherState>,
+    // When an [`AppEventKind::Terminated`] event is received, we need to emit [`WindowEvent::Closed`]
+    // events for every open window in that app. To maintain order, we use this pending queue to frontload
+    // events in the channel.
+    pending: VecDeque<Result<WindowEvent, WindowError>>,
 }
 
 impl Watcher {
     pub fn new() -> Result<Watcher, WindowError> {
-        // Start the app watcher so we never miss any new apps while registering existing apps.
-        let workspace_watcher = WorkspaceWatcher::new(ExistingAppsBehavior::TriggerExisting);
-
         let (sender, receiver) = mpsc::channel();
+        let workspace_watcher =
+            WorkspaceWatcher::new(sender.clone(), ExistingAppsBehavior::TriggerExisting);
+
         Ok(Watcher {
             workspace_watcher,
             sender,
             receiver,
-            watchers: HashMap::new(),
+            app_watchers: HashMap::new(),
+            pending: VecDeque::new(),
         })
     }
-
-    // TODO: same as below, but orders the output
-    // pub fn next_request_buffered_ordered(
-    //     &self,
-    //     interval: Duration,
-    // ) -> Result<WindowEvent, WindowError> {
-    //     todo!()
-    // }
-
-    // TODO: this function will call CFRunLoopInMode w/ interval seconds, it returns a list of events >= interval age
-    // pub fn next_request_buffered(&self, interval: Duration) -> Result<WindowEvent, WindowError> {
-    //     todo!()
-    // }
 
     /// Blocks until the next window event, pumping the main thread's run loop as needed.
     ///
     /// Must be called on the main thread because detecting new app launches/terminations relies
     /// on `NSWorkspace`, which only delivers updates while the process's actual main thread has
     /// an active run loop.
+    ///
+    /// We are at the mercy of macOS in terms of event ordering, so we can only report events in the
+    /// order we observe them. Proper ordering is not and can not be guaranteed.
     pub fn next_request(&mut self) -> Result<WindowEvent, WindowError> {
         assert!(
             MainThreadMarker::new().is_some(),
             "`next_request` must be called on the main thread"
         );
 
-        // Some things to know:
-        // * CFRunLoopInMode caches events internally when they happen. Calling the function will execute the callback for one event.
-        // * The if statement below is to handle outstanding events (e.g. failing to register, new app added, etc.).
-        if let Some(event) = self.try_next_request_no_pump() {
-            return event;
-        }
-
         loop {
-            // TODO: it is impossible to get a timestamp for when an event occurs
-            //       this function should run the loop to completion each call and return a vector of events
-            //       this way, the next time this function is called, you know those events are guaranteed to happen after the last
-            //       vector of events. It provides some sense of ordering and the vector will only occasionally have >1 element
+            // Some things to know:
+            // * CFRunLoopInMode caches events internally when they happen. Calling the function will execute the callback for one event.
+            // * We drain before pumping to handle outstanding events (e.g. failing to register, new app added, etc.), as well as
+            //   events we queue ourselves (e.g. closing the windows of a terminated app), which have no run loop source to wake us.
+            if let Some(event) = self.try_next_request_no_pump() {
+                return event;
+            }
+
             unsafe {
                 // Possible errors:
                 // * kCFRunLoopRunFinished: Impossible to occur, there will always be the app watcher.
@@ -126,20 +131,6 @@ impl Watcher {
                 // * kCFRunLoopRunTimedOut: It would take millions of years for the interval to timeout.
                 // * kCFRunLoopRunHandledSource: AKA success.
                 CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, f64::MAX, true);
-            }
-
-            // Handle registering/deregistering launched/terminated apps.
-            if let Some(event) = self.workspace_watcher.next_request() {
-                self.handle_app_event(event)?;
-                // Since CFRunLoopInMode only processes one event at a time, skip checking for window events.
-                continue;
-            }
-
-            // It can only error w/ disconnected if the sender is disconnected, but that's not possible because we
-            // always have a reference to the sender within this struct. If it errors with empty then we skip to the
-            // next iteration.
-            if let Ok(event) = self.receiver.try_recv() {
-                return event;
             }
         }
     }
@@ -157,27 +148,39 @@ impl Watcher {
     ///
     /// [`next_request`]: Watcher::next_request
     pub fn try_next_request_no_pump(&mut self) -> Option<Result<WindowEvent, WindowError>> {
-        if let Some(event) = self.workspace_watcher.next_request() {
-            if let Err(err) = self.handle_app_event(event) {
-                return Some(Err(err));
+        loop {
+            if let Some(event) = self.pending.pop_front() {
+                return Some(event);
+            }
+
+            // It can only error w/ disconnected if the sender is disconnected, but that's not possible because we
+            // always have a reference to the sender within this struct. If it errors with empty then there's simply
+            // no event ready yet.
+            match self.receiver.try_recv().ok()? {
+                Event::Window { pid, event } => {
+                    if let Ok(event) = &event {
+                        if let Some(WatcherState::Registered(watcher)) =
+                            self.app_watchers.get_mut(&pid)
+                        {
+                            watcher.handle_event(event);
+                        }
+                    }
+
+                    return Some(event);
+                }
+                // If handling the app event emits new closed events in the pending queue, the loop will cover it.
+                Event::App(event) => self.handle_app_event(event),
             }
         }
-
-        // It can only error w/ disconnected if the sender is disconnected, but that's not possible because we
-        // always have a reference to the sender within this struct. If it errors with empty then there's simply
-        // no event ready yet.
-        self.receiver.try_recv().ok()
     }
 
-    fn handle_app_event(&mut self, event: AppEvent) -> Result<(), WindowError> {
+    fn handle_app_event(&mut self, event: AppEvent) {
         match event.kind {
             AppEventKind::Launched | AppEventKind::Existing => {
-                self.watchers
+                self.app_watchers
                     .insert(event.pid, WatcherState::Registering(event.pid));
 
-                let workspace_context = self.workspace_watcher.context();
-                let app_sender = workspace_context.sender.clone();
-                let source = workspace_context.source.clone();
+                let source = self.workspace_watcher.context().source.clone();
                 let sender = self.sender.clone();
                 // Even though the accessibility API doesn't require observers to be registered to
                 // the main thread's run loop, we do it anyway to stay consistent with `WorkspaceWatcher`,
@@ -208,41 +211,48 @@ impl Watcher {
                     } else {
                         ExistingWindowsBehavior::Skip
                     };
-                    match app.watch(sender.clone(), existing_windows) {
+                    let app_event_kind = match app.watch(sender.clone(), existing_windows) {
                         Ok(watcher) => {
-                            let thread_loop = thread_loop;
                             watcher.run_on_thread(&thread_loop);
+                            AppEventKind::Registered(watcher)
+                        }
+                        Err(err) => AppEventKind::FailedToRegister(err),
+                    };
 
-                            let _ = app_sender.send(AppEvent {
-                                kind: AppEventKind::Registered(watcher),
-                                pid: app.pid(),
-                            });
-                            source.signal();
-                            thread_loop.wake_up();
-                        }
-                        Err(err) => {
-                            // TODO: in this case, return a struct dedicated to reconnecting the failed watcher that the user can handle
-                            let _ = sender.send(Err(err));
-                        }
-                    }
+                    let _ = sender.send(Event::App(AppEvent {
+                        kind: app_event_kind,
+                        pid: app.pid(),
+                    }));
+
+                    source.signal();
+                    thread_loop.wake_up();
                 });
             }
             AppEventKind::Terminated => {
-                self.watchers.remove(&event.pid);
+                if let Some(WatcherState::Registered(watcher)) =
+                    self.app_watchers.remove(&event.pid)
+                {
+                    // Trigger [`WindowEvent::Closed`] for any open windows we know about since macOS doesn't do that for us.
+                    self.pending
+                        .extend(watcher.into_closed_events().into_iter().map(Ok));
+                }
             }
             AppEventKind::Registered(watcher) => {
                 // If it already exists in the hash map, then it MUST be WatcherState::Registering, which is the only acceptable case.
                 // If it doesn't exist in the hash map, then it must've been terminated already.
                 // It can't be WatcherState::Registered because it's not possible for the launch notification to be sent twice.
                 // TODO: verify the latter case or implement check
-                if self.watchers.contains_key(&event.pid) {
-                    self.watchers
-                        .insert(event.pid, WatcherState::Registered(watcher));
+                match self.app_watchers.get_mut(&event.pid) {
+                    Some(entry) => {
+                        *entry = WatcherState::Registered(watcher);
+                    }
+                    None => self
+                        .pending
+                        .extend(watcher.into_closed_events().into_iter().map(Ok)),
                 }
             }
+            AppEventKind::FailedToRegister(err) => self.pending.push_back(Err(err)),
         }
-
-        Ok(())
     }
 }
 
