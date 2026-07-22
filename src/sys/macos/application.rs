@@ -24,6 +24,7 @@ use super::{
         kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
     },
     window::Window,
+    Event,
 };
 
 const DEFAULT_AX_TIMEOUT: Duration = Duration::from_secs(1);
@@ -82,7 +83,7 @@ impl Application {
 
     pub fn watch(
         &self,
-        sender: Sender<Result<WindowEvent, WindowError>>,
+        sender: Sender<Event>,
         existing_windows: ExistingWindowsBehavior,
     ) -> Result<AppWatcher, WindowError> {
         AppWatcher::new(self, sender, existing_windows)
@@ -141,10 +142,13 @@ pub enum ExistingWindowsBehavior {
 pub struct AppWatcher {
     // Resources are implicitly dropped after observer, so it's safe.
     observer: CFRetainedSafe<AXObserver>,
+    // The per-window destroyed notification resources.
+    #[allow(clippy::vec_box)]
+    destroyed_resources: Vec<Box<CallbackInfo>>,
     // macOS stores pointers to these values which must be dropped when
     // this struct is dropped.
     #[allow(clippy::vec_box)]
-    _resources: Vec<Box<CallbackInfo>>,
+    _app_resources: Vec<Box<CallbackInfo>>,
 }
 
 impl AppWatcher {
@@ -185,7 +189,7 @@ impl AppWatcher {
 
     pub fn new(
         app: &Application,
-        sender: Sender<Result<WindowEvent, WindowError>>,
+        sender: Sender<Event>,
         existing_windows_behavior: ExistingWindowsBehavior,
     ) -> Result<AppWatcher, WindowError> {
         let mut observer = ptr::null_mut();
@@ -201,8 +205,8 @@ impl AppWatcher {
                 let observer = unsafe { CFRetained::from_raw(NonNull::new_unchecked(observer)) };
 
                 let raw_windows = raw_windows(&app.inner)?;
-                let mut resources =
-                    Vec::with_capacity(raw_windows.len() + AppWatcher::NOTIFICATIONS.len());
+                let mut destroyed_resources = Vec::with_capacity(raw_windows.len());
+                let mut app_resources = Vec::with_capacity(AppWatcher::NOTIFICATIONS.len());
 
                 // Since the destroyed notification doesn't include any information on the window, we must register
                 // for each window with opaque data specifying the window being destroyed.
@@ -213,6 +217,7 @@ impl AppWatcher {
                     }
                     let info = Box::new(CallbackInfo {
                         sender: sender.clone(),
+                        pid: app.pid,
                         notification: Notification::Destroyed(CFRetainedSafe(
                             window_handle.clone(),
                         )),
@@ -225,12 +230,15 @@ impl AppWatcher {
                         info.as_ref(),
                     )?;
 
-                    resources.push(info);
+                    destroyed_resources.push(info);
 
                     if existing_windows_behavior == ExistingWindowsBehavior::TriggerExisting {
                         if let Ok(window) = Window::new(window_handle.clone(), app.inner.0.clone())
                         {
-                            let _ = sender.send(Ok(WindowEvent::Opened(protocol::Window(window))));
+                            let _ = sender.send(Event::Window {
+                                pid: app.pid,
+                                event: Ok(WindowEvent::Opened(protocol::Window(window))),
+                            });
                         }
                     }
                 }
@@ -238,6 +246,7 @@ impl AppWatcher {
                 for notification in AppWatcher::NOTIFICATIONS {
                     let info = Box::new(CallbackInfo {
                         sender: sender.clone(),
+                        pid: app.pid,
                         notification: match notification {
                             ffi::kAXWindowCreatedNotification => {
                                 Notification::Created(app.inner.clone())
@@ -269,22 +278,42 @@ impl AppWatcher {
                         },
                     });
 
-                    AppWatcher::add_notification(
+                    Self::add_notification(
                         &CFString::from_static_str(notification),
                         &observer,
                         &app.inner,
                         info.as_ref(),
                     )?;
 
-                    resources.push(info);
+                    app_resources.push(info);
                 }
 
                 Ok(AppWatcher {
                     observer: CFRetainedSafe(observer),
-                    _resources: resources,
+                    _app_resources: app_resources,
+                    destroyed_resources,
                 })
             }
             _ => Err(result.into()),
+        }
+    }
+
+    /// Updates this watcher's state for an event it produced. It should be called as the event is
+    /// delivered.
+    ///
+    /// The purpose of this function is twofold:
+    /// 1. `kAXUIElementDestroyedNotification` holds per-window state that needs to be cleaned up.
+    /// 2. TODO: `kAXWindowCreatedNotification` needs to attach notifications per window.
+    ///
+    /// Ideally [`app_notification`] would do this itself, without the caller passing the event back.
+    /// The problem is that the the callback only gets a pointer to its `CallbackInfo`, so clearing it
+    /// from the container that owns it means every entry must hold a reference to the container. It's
+    /// quite the pickle but this is the least complex solution.
+    pub fn handle_event(&mut self, event: &WindowEvent) {
+        if let WindowEvent::Closed(window_handle) = event {
+            self.destroyed_resources.retain(
+                |info| !matches!(&info.notification, Notification::Destroyed(handle) if handle == &window_handle.0),
+            );
         }
     }
 
@@ -295,6 +324,22 @@ impl AppWatcher {
                 kCFRunLoopDefaultMode,
             );
         }
+    }
+
+    /// Returns [`WindowEvent::Closed`] for every window this app still has open.
+    ///
+    /// Used when the app terminates, since macOS does not deliver window destroyed notifications.
+    pub(crate) fn into_closed_events(self) -> Vec<WindowEvent> {
+        self.destroyed_resources
+            .into_iter()
+            .filter_map(|info| match info.notification {
+                Notification::Destroyed(window_handle) => {
+                    Some(WindowEvent::Closed(protocol::WindowHandle(window_handle)))
+                }
+                // This case is impossible since the vec only stores destroyed events.
+                _ => None,
+            })
+            .collect()
     }
 
     fn add_notification(
@@ -362,7 +407,8 @@ impl Notification {
 
 #[derive(Debug)]
 pub struct CallbackInfo {
-    sender: Sender<Result<WindowEvent, WindowError>>,
+    sender: Sender<Event>,
+    pid: pid_t,
     notification: Notification,
 }
 
@@ -375,8 +421,8 @@ unsafe extern "C-unwind" fn app_notification(
     // let notification = unsafe { CFRetained::retain(notification) };
     // println!("{:?}", notification.to_string());
 
-    let callback_info = refcon as *const CallbackInfo;
-    let event = match &(*callback_info).notification {
+    let callback_info = &*(refcon as *const CallbackInfo);
+    let event = match &callback_info.notification {
         Notification::Created(app_handle)
         | Notification::Focused(app_handle)
         | Notification::Moved(app_handle)
@@ -393,7 +439,7 @@ unsafe extern "C-unwind" fn app_notification(
                 Err(_) => return,
             };
 
-            (*callback_info).notification.info(Some(window))
+            callback_info.notification.info(Some(window))
         }
         Notification::Activated(app_handle) => {
             // TODO: lots of code dupe between above and from window module
@@ -411,7 +457,7 @@ unsafe extern "C-unwind" fn app_notification(
                     Ok(window) => window,
                     Err(_) => return,
                 };
-                (*callback_info).notification.info(Some(window))
+                callback_info.notification.info(Some(window))
             } else {
                 // This could occur when an application has no windows but is focused (using cmd+tab).
                 return;
@@ -424,19 +470,23 @@ unsafe extern "C-unwind" fn app_notification(
             if result == AXError::Success {
                 if let Ok(window_iter) = Application::new(pid).iter_windows() {
                     for window in window_iter.into_iter().flatten() {
-                        let _ = (*callback_info)
-                            .sender
-                            .send(Ok((*callback_info).notification.info(Some(window))));
+                        let _ = callback_info.sender.send(Event::Window {
+                            pid: callback_info.pid,
+                            event: Ok(callback_info.notification.info(Some(window))),
+                        });
                     }
                 }
             }
             return;
         }
-        Notification::Destroyed(_) => (*callback_info).notification.info(None),
+        Notification::Destroyed(_) => callback_info.notification.info(None),
     };
 
     // It can only error if the sender is disconnected, and in that case, who cares.
-    let _ = (*callback_info).sender.send(Ok(event));
+    let _ = callback_info.sender.send(Event::Window {
+        pid: callback_info.pid,
+        event: Ok(event),
+    });
 }
 
 pub(super) fn raw_windows(

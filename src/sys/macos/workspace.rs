@@ -1,8 +1,4 @@
-use std::{
-    ffi::c_void,
-    ptr,
-    sync::mpsc::{self, Receiver, Sender},
-};
+use std::{ffi::c_void, ptr, sync::mpsc::Sender};
 
 use libc::pid_t;
 use objc2::{define_class, msg_send, rc::Retained, runtime::AnyObject, AnyThread};
@@ -15,9 +11,9 @@ use objc2_foundation::{
     NSKeyValueChangeOldKey, NSKeyValueObservingOptions, NSObject, NSString,
 };
 
-use crate::sys::platform::ffi::CFRetainedSafe;
+use crate::{protocol::WindowError, sys::platform::ffi::CFRetainedSafe};
 
-use super::{application, filter_apps, iter_apps};
+use super::{application, filter_apps, iter_apps, Event};
 
 #[derive(Debug)]
 pub enum AppEventKind {
@@ -25,6 +21,7 @@ pub enum AppEventKind {
     Launched,
     Terminated,
     Registered(application::AppWatcher),
+    FailedToRegister(WindowError),
 }
 
 #[derive(Debug)]
@@ -59,10 +56,10 @@ define_class!(
                         .into_iter()
                         .map(|app| app.downcast::<NSRunningApplication>().unwrap());
                     for app in filter_apps(new_apps) {
-                        let _ = (*context).sender.send(AppEvent {
+                        let _ = (*context).sender.send(Event::App(AppEvent {
                             kind: AppEventKind::Launched,
                             pid: app.processIdentifier(),
-                        });
+                        }));
 
                         sent = true;
                     }
@@ -75,10 +72,10 @@ define_class!(
                         .into_iter()
                         .map(|app| app.downcast::<NSRunningApplication>().unwrap());
                     for app in filter_apps(old_apps) {
-                        let _ = (*context).sender.send(AppEvent {
+                        let _ = (*context).sender.send(Event::App(AppEvent {
                             kind: AppEventKind::Terminated,
                             pid: app.processIdentifier(),
-                        });
+                        }));
 
                         sent = true;
                     }
@@ -95,7 +92,7 @@ define_class!(
 
 #[derive(Debug)]
 pub struct Context {
-    pub sender: Sender<AppEvent>,
+    pub sender: Sender<Event>,
     // The reason we create a "dummy" source is because registering a KVO (AKA WorkspaceWatcherInner) does not trigger
     // a source as being "processed" thus not prompting CFRunLoopInMode to return.
     pub source: CFRetainedSafe<CFRunLoopSource>,
@@ -123,11 +120,13 @@ pub enum ExistingAppsBehavior {
 pub struct WorkspaceWatcher {
     inner: Retained<WorkspaceWatcherInner>,
     context: Box<Context>,
-    receiver: Receiver<AppEvent>,
 }
 
 impl WorkspaceWatcher {
-    pub fn new(existing_apps_behavior: ExistingAppsBehavior) -> WorkspaceWatcher {
+    pub fn new(
+        sender: Sender<Event>,
+        existing_apps_behavior: ExistingAppsBehavior,
+    ) -> WorkspaceWatcher {
         let source = unsafe {
             CFRunLoopSource::new(
                 None,
@@ -153,7 +152,6 @@ impl WorkspaceWatcher {
                 .add_source(source.as_deref(), kCFRunLoopDefaultMode);
         }
 
-        let (sender, receiver) = mpsc::channel();
         let context = Box::into_raw(Box::new(Context {
             sender: sender.clone(),
             source: CFRetainedSafe(source.unwrap()),
@@ -174,10 +172,10 @@ impl WorkspaceWatcher {
         if existing_apps_behavior == ExistingAppsBehavior::TriggerExisting {
             for app in iter_apps() {
                 sender
-                    .send(AppEvent {
+                    .send(Event::App(AppEvent {
                         kind: AppEventKind::Existing,
                         pid: app.pid(),
-                    })
+                    }))
                     // Sender + Receiver always exist.
                     .unwrap();
             }
@@ -186,18 +184,11 @@ impl WorkspaceWatcher {
         WorkspaceWatcher {
             inner,
             context: unsafe { Box::from_raw(context) },
-            receiver,
         }
     }
 
     pub fn context(&self) -> &Context {
         &self.context
-    }
-
-    // Assumes the run loop is being ran.
-    pub fn next_request(&self) -> Option<AppEvent> {
-        // Impossible for disconnected error, only possible for empty error, in which case it should be an option.
-        self.receiver.try_recv().ok()
     }
 }
 
